@@ -30,8 +30,8 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * same body gets that answer replayed (`Idempotent-Replay: true`). The same key with a different
  * body is `409 IDEMPOTENCY_KEY_REUSED` — a different request wearing a used key.
  *
- * A failed request releases its claim, so it may be retried and succeed. The guarantee that matters
- * — a licence issued once, a subscription created once — is about successes.
+ * A request whose action fails releases its claim, so it may be retried and succeed. The guarantee
+ * that matters (a licence issued once, a subscription created once) is about successes.
  */
 const IN_PROGRESS = 0;
 
@@ -87,6 +87,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
           return of(existing.response);
         }
         return next.handle().pipe(
+          // Only a failure of the action itself releases the claim. Once the action has succeeded
+          // the claim is never released: if recording its answer failed, a retry must not run it
+          // again, so the key stays in progress until it expires.
+          catchError((error: unknown) =>
+            from(this.prisma.idempotencyRecord.delete({ where }).catch(() => undefined)).pipe(
+              switchMap(() => throwError(() => error)),
+            ),
+          ),
           switchMap((body: unknown) =>
             from(
               this.prisma.idempotencyRecord.update({
@@ -99,11 +107,6 @@ export class IdempotencyInterceptor implements NestInterceptor {
                 },
               }),
             ).pipe(switchMap(() => of(body))),
-          ),
-          catchError((error: unknown) =>
-            from(this.prisma.idempotencyRecord.delete({ where }).catch(() => undefined)).pipe(
-              switchMap(() => throwError(() => error)),
-            ),
           ),
         );
       }),

@@ -392,6 +392,25 @@ describe('idempotent retries', () => {
     expect(reused.body.code).toBe('IDEMPOTENCY_KEY_REUSED');
     expect(await h.owner.subscription.count()).toBe(1);
   });
+  it('replays an answer holding a bigint price, which the portal sends with every draft', async () => {
+    const w = await world();
+    const headers = { ...admin(), 'Idempotency-Key': 'draft-version-0001' };
+    const body = { features: [], limits: {}, priceMinor: 12_500, currency: 'JOD' };
+    const first = await h.http
+      .post(`/api/v1/admin/plans/${w.plan.id}/versions`)
+      .set(headers)
+      .send(body)
+      .expect(201);
+    expect(first.body.priceMinor).toBe(12_500);
+    const retry = await h.http
+      .post(`/api/v1/admin/plans/${w.plan.id}/versions`)
+      .set(headers)
+      .send(body)
+      .expect(201);
+    expect(retry.headers['idempotent-replay']).toBe('true');
+    expect(retry.body).toEqual(first.body);
+    expect(await h.owner.planVersion.count({ where: { planId: w.plan.id } })).toBe(2);
+  });
 });
 
 describe('idempotent retries under concurrency', () => {

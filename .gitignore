@@ -10,3 +10,4 @@ coverage
 deploy/secrets/*
 !deploy/secrets/README.md
 next-env.d.ts
+*.tsbuildinfo

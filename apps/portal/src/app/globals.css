@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+@import '@munaxa/theme/css/corporate';
+@source '../../node_modules/@munaxa/platform/dist';
+
+/*
+ * Branding is configuration, not code. The control plane is Munaxa Group's own surface, so it wears
+ * the corporate theme; nothing here names a colour, a font, a radius or a shadow.
+ */

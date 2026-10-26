@@ -1,0 +1,7 @@
+# Munaxa Control — the Munaxa Group subscription and licensing control plane.
+#
+# A peer of the products it serves, not part of any of them: it owns customers, plans,
+# subscriptions, licence issuance and usage, and nothing a product owns. Nothing here may depend
+# on Munaxa School, Work or Docs; what crosses is HTTP and the shared `@munaxa/licensing` contract.
+packages:
+  - 'apps/*'

@@ -1,0 +1,12 @@
+node_modules
+dist
+.next
+.turbo
+coverage
+.env
+.env.*
+!.env.example
+*.pem
+deploy/secrets/*
+!deploy/secrets/README.md
+next-env.d.ts

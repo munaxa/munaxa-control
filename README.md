@@ -66,9 +66,13 @@ TEST_DATABASE_MIGRATION_URL=postgresql://control_owner@…/control_test pnpm tes
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — boundaries, and why each one is where it is
 - [`docs/adr/`](./docs/adr) — decisions
-- [`docs/operations/`](./docs/operations) — deployment, secrets, licence signing and key rotation, recovery
+- [`docs/api.md`](./docs/api.md) — every endpoint, permission and error code
+- [`docs/integration.md`](./docs/integration.md) — how School, Work and Docs integrate, and the contract each keeps
+- [`docs/operations/`](./docs/operations) — [deployment](./docs/operations/deployment.md),
+  [secrets](./docs/operations/secrets.md), [licence signing and key rotation](./docs/operations/licence-signing.md),
+  [backups and recovery](./docs/operations/recovery.md)
 
 ## Status
 
-Not deployed. Depends on `@munaxa/licensing@0.1.0`, which is not yet published; until it is,
-`pnpm install --frozen-lockfile` fails.
+Not deployed, and nothing published. Depends on `@munaxa/licensing@0.1.0`, which is not yet
+published; until it is, `pnpm install --frozen-lockfile` fails here and in CI.

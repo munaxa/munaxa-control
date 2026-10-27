@@ -17,6 +17,17 @@ const base = {
 const reads = () => PRIVATE;
 
 describe('loadEnvironment', () => {
+  it('accepts production with an operator allow-list, or with MFA required', () => {
+    const production = { ...base, NODE_ENV: 'production' };
+    expect(
+      loadEnvironment({ ...production, OPERATOR_SUBJECT_ALLOWLIST: ' a , b ' }, reads)
+        .operatorSubjects,
+    ).toEqual(new Set(['a', 'b']));
+    expect(
+      loadEnvironment({ ...production, OPERATOR_REQUIRE_MFA: 'true' }, reads).operatorSubjects.size,
+    ).toBe(0);
+  });
+
   it('loads a complete configuration with safe defaults', () => {
     const environment = loadEnvironment(base, reads);
     expect(environment).toMatchObject({
@@ -50,9 +61,14 @@ describe('loadEnvironment', () => {
         ]),
       },
     ],
+    ['production without MFA and without an operator allow-list', { NODE_ENV: 'production' }],
     [
       'a plain-http issuer in production',
-      { NODE_ENV: 'production', OPERATOR_AUTH_ISSUER: 'http://munaxa.example/api/auth' },
+      {
+        NODE_ENV: 'production',
+        OPERATOR_AUTH_ISSUER: 'http://munaxa.example/api/auth',
+        OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
+      },
     ],
   ])('refuses %s', (_label, patch) => {
     expect(() => loadEnvironment({ ...base, ...patch }, reads)).toThrow(ConfigurationError);

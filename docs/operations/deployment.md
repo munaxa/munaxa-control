@@ -26,6 +26,8 @@ published (see the repository README).
   and the probes, on the products' hostname; deny `/api/v1/admin/*` there at the load balancer as a
   second line (the API refuses it anyway without an operator token).
 - **TLS everywhere outside the host.** Products refuse an `http://` `CONTROL_PLANE_URL` in production.
+- **The operator front door is not on the open internet** while operators have one factor (ADR-0006):
+  restrict it to Munaxa Group's network or VPN at the load balancer or WAF.
 
 ## Database
 
@@ -41,9 +43,27 @@ DATABASE_MIGRATION_URL=postgresql://control_owner@…/control pnpm db:migrate   
 owner's credentials. Run migrations as a release step, before the new API version starts; they are
 additive.
 
+## Images
+
+One `Dockerfile`, three targets, each built from the committed lockfile on a digest-pinned base, with
+the `@munaxa/*` registry token as a BuildKit secret that never reaches a layer:
+
+```bash
+for target in api migrate portal; do
+  docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+    --target "$target" -t "munaxa-control-$target:$(git rev-parse --short HEAD)" .
+done
+```
+
+| Target    | Runs                                    | Notes                                                                                                                                                                                                                              |
+| --------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`     | `node dist/main.js` as `node`           | Production dependencies only. Works on a read-only root filesystem with a `/tmp` tmpfs. Mount the signing key read-only at `LICENCE_SIGNING_PRIVATE_KEY_FILE`, owned by uid 1000, mode 0400. Has a `HEALTHCHECK` on `/health/live` |
+| `migrate` | `node scripts/migrate.mjs` as `node`    | The release job: migrations and runtime grants as the owner role (`DATABASE_MIGRATION_URL`). Run once, before the new API                                                                                                          |
+| `portal`  | the Next.js standalone server as `node` | `CONTROL_API_URL`, `PORT` (3200). No secret                                                                                                                                                                                        |
+
 ## The API
 
-Build `pnpm --filter @control/api build`; run `node apps/api/dist/main.js`. Configuration is
+Build `pnpm --filter @control/api build`; run `node apps/api/dist/main.js` (or the `api` image). Configuration is
 `.env.example`; everything is validated at startup and a bad value stops the process.
 
 | Variable                                                                       | Notes                                                                          |

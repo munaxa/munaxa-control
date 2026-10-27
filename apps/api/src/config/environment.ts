@@ -47,6 +47,15 @@ const schema = z.object({
    * has not shipped MFA yet (its ADR-0003); production must turn it on the day it does.
    */
   OPERATOR_REQUIRE_MFA: booleanFromEnv.default(false),
+  /**
+   * The Identity subjects (user ids) allowed to operate this plane, comma-separated — ADR-0006.
+   *
+   * The interim restriction while Identity issues no `mfa` claim: a `control:` role granted by
+   * mistake in Identity does not by itself open the control plane, because the person must also be
+   * named here, in this deployment's own configuration. Required in production while
+   * `OPERATOR_REQUIRE_MFA` is off; optional (and still enforced when set) once it is on.
+   */
+  OPERATOR_SUBJECT_ALLOWLIST: z.string().default(''),
 
   /** The licence signing key, as a file. Never an environment literal, never in an image. */
   LICENCE_SIGNING_PRIVATE_KEY_FILE: z.string().min(1),
@@ -76,6 +85,8 @@ export interface PublicKey {
 export interface Environment extends RawEnvironment {
   readonly operatorAudience: readonly string[];
   readonly operatorPublicKeys: readonly PublicKey[];
+  /** `OPERATOR_SUBJECT_ALLOWLIST`, parsed. Empty means no allow-list is configured. */
+  readonly operatorSubjects: ReadonlySet<string>;
   readonly licencePrivateKey: string;
   readonly licencePreviousPublicKeys: readonly PublicKey[];
 }
@@ -164,6 +175,15 @@ export function loadEnvironment(
     issues.push('OPERATOR_AUTH_ISSUER: must be https in production.');
   }
 
+  const operatorSubjects = raw.OPERATOR_SUBJECT_ALLOWLIST.split(',')
+    .map((subject) => subject.trim())
+    .filter((subject) => subject.length > 0);
+  if (raw.NODE_ENV === 'production' && !raw.OPERATOR_REQUIRE_MFA && operatorSubjects.length === 0) {
+    issues.push(
+      'OPERATOR_SUBJECT_ALLOWLIST: required in production until OPERATOR_REQUIRE_MFA is on (ADR-0006).',
+    );
+  }
+
   let licencePrivateKey = '';
   try {
     licencePrivateKey = readFile(raw.LICENCE_SIGNING_PRIVATE_KEY_FILE);
@@ -179,6 +199,8 @@ export function loadEnvironment(
     ...raw,
     operatorAudience,
     operatorPublicKeys,
+    /** Empty means no list: every subject of the operator organisation, as far as this check goes. */
+    operatorSubjects: new Set(operatorSubjects),
     licencePrivateKey,
     licencePreviousPublicKeys,
   });

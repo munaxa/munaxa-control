@@ -118,6 +118,13 @@ describe('operator authentication through Munaxa Identity', () => {
       .expect(200);
   });
 
+  it('refuses a token minted outside an Identity session', async () => {
+    await h.http
+      .get('/api/v1/admin/customers')
+      .set(auth(h.token(undefined, { session: false })))
+      .expect(401);
+  });
+
   it('honours no wildcard and no other product’s namespace', async () => {
     await h.http
       .get('/api/v1/admin/customers')
@@ -619,5 +626,39 @@ describe('the audit trail', () => {
     await expect(runtime.$executeRawUnsafe('DELETE FROM audit_event')).rejects.toThrow(
       /permission denied/,
     );
+  });
+});
+
+describe('the interim operator restriction (ADR-0006)', () => {
+  let restricted: Harness;
+  beforeAll(async () => {
+    restricted = await startHarness({ OPERATOR_SUBJECT_ALLOWLIST: 'operator-1, operator-2' });
+  });
+  afterAll(async () => {
+    await restricted.close();
+  });
+
+  it('admits only the subjects this deployment names, whatever Identity grants', async () => {
+    const as = (subject: string) =>
+      restricted.http
+        .get('/api/v1/admin/customers')
+        .set(auth(restricted.token(undefined, { subject })));
+    await as('operator-1').expect(200);
+    await as('operator-2').expect(200);
+    const refused = await as('someone-granted-by-mistake').expect(401);
+    expect(refused.body.detail).toMatch(/may not operate/);
+  });
+
+  it('requires a satisfied second factor once MFA is switched on', async () => {
+    const mfa = await startHarness({ OPERATOR_REQUIRE_MFA: 'true' });
+    try {
+      await mfa.http.get('/api/v1/admin/customers').set(auth(mfa.token())).expect(401);
+      await mfa.http
+        .get('/api/v1/admin/customers')
+        .set(auth(mfa.token(undefined, { mfa: true })))
+        .expect(200);
+    } finally {
+      await mfa.close();
+    }
   });
 });

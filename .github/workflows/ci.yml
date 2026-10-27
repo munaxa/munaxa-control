@@ -104,3 +104,24 @@ jobs:
         run: |
           pnpm catalogue:emit
           git diff --exit-code -- artifacts/control-permissions.json
+
+  image:
+    name: Build the images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      # Built, not pushed: publishing an image is a release step that needs its own authorisation.
+      - name: Build api, migrate and portal
+        run: |
+          set -euo pipefail
+          for target in api migrate portal; do
+            docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+              --target "$target" -t "munaxa-control-$target:ci" --load .
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}

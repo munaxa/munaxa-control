@@ -29,8 +29,10 @@ import { parseServiceToken, secretMatches } from './service-credentials';
  *    A controller that declares neither is refused outright, so a forgotten decorator is a 403
  *    rather than an open door.
  * 3. An operator token is verified against Identity's public keys — signature, expiry, issuer,
- *    audience — must belong to Munaxa Group's own organisation, and must carry every permission
- *    the route names. Permissions come from the token's `perms`, filtered to this catalogue.
+ *    audience — must belong to Munaxa Group's own organisation and to an Identity session, must
+ *    satisfy MFA when required and name a subject on the allow-list when one is set (ADR-0006),
+ *    and must carry every permission the route names. Permissions come from the token's `perms`,
+ *    filtered to this catalogue.
  * 4. A service credential must exist, be unrevoked, and match.
  */
 @Injectable()
@@ -102,8 +104,23 @@ export class AuthenticationGuard implements CanActivate {
       this.logger.warn({ subject: claims.sub }, 'operator token from another organisation refused');
       throw new UnauthorizedException('This token is not for Munaxa Group.');
     }
+    // An operator is a person signed in to an Identity session, which Identity can revoke. A token
+    // minted without one — a machine's, say — is not an operator's, whatever it carries.
+    if (claims.sid === undefined) {
+      this.logger.warn({ subject: claims.sub }, 'operator token without a session refused');
+      throw new UnauthorizedException('Sign in with Munaxa Identity.');
+    }
     if (this.environment.OPERATOR_REQUIRE_MFA && claims.mfa !== true) {
       throw new UnauthorizedException('A second factor is required.');
+    }
+    // ADR-0006: until Identity issues `mfa`, the person must also be named in this deployment.
+    const allowed = this.environment.operatorSubjects;
+    if (allowed.size > 0 && !allowed.has(claims.sub)) {
+      this.logger.warn(
+        { subject: claims.sub },
+        'operator not on OPERATOR_SUBJECT_ALLOWLIST refused',
+      );
+      throw new UnauthorizedException('This account may not operate Munaxa Control.');
     }
     return { kind: 'OPERATOR', subject: claims.sub, permissions: controlGrantsFrom(claims.perms) };
   }

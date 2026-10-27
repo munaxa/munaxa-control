@@ -51,14 +51,19 @@ export interface Harness {
   readonly environment: Environment;
   readonly owner: PrismaClient;
   /** An Identity access token for a Munaxa Group operator holding `permissions`. */
-  token(permissions?: readonly string[], overrides?: { tid?: string; subject?: string }): string;
+  token(
+    permissions?: readonly string[],
+    overrides?: { tid?: string; subject?: string; session?: boolean; mfa?: boolean },
+  ): string;
   /** A token signed by a key Identity does not hold. */
   forgedToken(): string;
   reset(): Promise<void>;
   close(): Promise<void>;
 }
 
-export async function startHarness(): Promise<Harness> {
+export async function startHarness(
+  overrides: Readonly<Record<string, string>> = {},
+): Promise<Harness> {
   const url = process.env['TEST_DATABASE_URL'];
   const ownerUrl = process.env['TEST_DATABASE_MIGRATION_URL'];
   if (url === undefined || ownerUrl === undefined) {
@@ -82,6 +87,7 @@ export async function startHarness(): Promise<Harness> {
       OPERATOR_ORGANISATION_ID: ORGANISATION,
       LICENCE_SIGNING_PRIVATE_KEY_FILE: '/secrets/licence.pem',
       LICENCE_SIGNING_KID: 'licence-test-1',
+      ...overrides,
     },
     () => licence.privateKey,
   );
@@ -107,13 +113,15 @@ export async function startHarness(): Promise<Harness> {
   const mint = (
     service: TokenService,
     permissions: readonly string[],
-    overrides: { tid?: string; subject?: string } = {},
+    overrides: { tid?: string; subject?: string; session?: boolean; mfa?: boolean } = {},
   ) =>
     service.issueAccessToken({
       subject: overrides.subject ?? 'operator-1',
       tenantId: (overrides.tid ?? ORGANISATION) as never,
       tokenVersion: 1,
       permissions: [...permissions],
+      ...(overrides.session !== false && { sessionId: 'session-1' as never }),
+      ...(overrides.mfa !== undefined && { mfaSatisfied: overrides.mfa }),
     }).token;
 
   return {

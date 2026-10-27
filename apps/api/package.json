@@ -2,6 +2,9 @@
   "name": "@control/api",
   "version": "0.1.0",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "description": "Munaxa Control API \u2014 customers, plans, subscriptions, entitlements, licence issuance and usage.",
   "license": "UNLICENSED",
   "scripts": {

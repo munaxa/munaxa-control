@@ -1,0 +1,298 @@
+// Munaxa Control — the commercial record of the Munaxa ecosystem.
+//
+// Who the customers are, what each bought for each product, and what was issued to them. It holds
+// no credential of any person (that is Munaxa Identity's), no product data (that is each product's)
+// and no payment instrument. Product, feature and limit keys are the products' own vocabulary,
+// validated against the shared `@munaxa/licensing` key grammar and never interpreted here.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A Munaxa Group customer: one contracting organisation, across every product it buys.
+model Customer {
+  id           String    @id @db.Uuid
+  name         String
+  legalName    String?   @map("legal_name")
+  /// ISO 3166-1 alpha-2.
+  country      String?   @db.Char(2)
+  contactEmail String?   @map("contact_email")
+  /// `ACTIVE` or `CLOSED`. Closing a customer never deletes what was sold to it.
+  status       String    @default("ACTIVE")
+  version      Int       @default(1)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String    @map("created_by")
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenants TenantLink[]
+
+  @@index([name], map: "ix_customer_name")
+  @@map("customer")
+}
+
+/// One running SaaS deployment of a product — "docs, eu-central-1, production". A service
+/// credential belongs to exactly one, and can only ever see the tenants linked to it.
+model ProductDeployment {
+  id        String   @id @db.Uuid
+  product   String
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by")
+
+  credentials ServiceCredential[]
+  tenants     TenantLink[]
+
+  @@unique([product, name], map: "uq_deployment_product_name")
+  @@map("product_deployment")
+}
+
+/// How a deployment authenticates to this service. Only a SHA-256 of the secret is stored; the
+/// secret is shown once, when it is created.
+model ServiceCredential {
+  id           String    @id @db.Uuid
+  deploymentId String    @map("deployment_id") @db.Uuid
+  label        String
+  secretHash   String    @map("secret_hash") @db.Char(64)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String    @map("created_by")
+  lastUsedAt   DateTime? @map("last_used_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy    String?   @map("revoked_by")
+
+  deployment ProductDeployment @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@index([deploymentId], map: "ix_credential_deployment")
+  @@map("service_credential")
+}
+
+/// A customer's tenant in one product. `tenantRef` is the product's own tenant identifier, which
+/// is what the product asks about; this service never mints it.
+model TenantLink {
+  id             String   @id @db.Uuid
+  customerId     String   @map("customer_id") @db.Uuid
+  product        String
+  tenantRef      String   @map("tenant_ref")
+  /// `SAAS` (served by a deployment, entitlements over the API) or `ON_PREMISES` (licence files).
+  deploymentType String   @map("deployment_type")
+  deploymentId   String?  @map("deployment_id") @db.Uuid
+  displayName    String   @map("display_name")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String   @map("created_by")
+
+  customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  deployment    ProductDeployment? @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+  subscriptions Subscription[]
+  installations Installation[]
+  usage         UsageReport[]
+
+  @@unique([product, tenantRef], map: "uq_tenant_product_ref")
+  @@index([customerId], map: "ix_tenant_customer")
+  @@map("tenant_link")
+}
+
+/// A product's sellable package — "Docs Business". The terms live in its versions.
+model Plan {
+  id          String   @id @db.Uuid
+  product     String
+  code        String
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String   @map("created_by")
+
+  versions PlanVersion[]
+
+  @@unique([product, code], map: "uq_plan_product_code")
+  @@map("plan")
+}
+
+/// What a plan included at one point in time. A published version is immutable — enforced by a
+/// trigger — so changing a price or a limit never rewrites what an existing subscriber bought.
+model PlanVersion {
+  id            String    @id @db.Uuid
+  planId        String    @map("plan_id") @db.Uuid
+  version       Int
+  /// `DRAFT`, `PUBLISHED` or `RETIRED`. Only `PUBLISHED` can be sold.
+  state         String    @default("DRAFT")
+  features      String[]
+  /// `{ "<limit key>": <non-negative integer> | null }`; `null` is unlimited.
+  limits        Json      @default("{}")
+  /// List price in minor units. Informational: nothing here collects payment.
+  priceMinor    BigInt?   @map("price_minor")
+  currency      String?   @db.Char(3)
+  /// `MONTHLY` or `YEARLY`; null for a bespoke term.
+  billingPeriod String?   @map("billing_period")
+  trialDays     Int       @default(0) @map("trial_days")
+  graceDays     Int       @default(14) @map("grace_days")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     String    @map("created_by")
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  retiredAt     DateTime? @map("retired_at") @db.Timestamptz(6)
+
+  plan          Plan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscriptions Subscription[]
+
+  @@unique([planId, version], map: "uq_plan_version")
+  @@map("plan_version")
+}
+
+/// What one tenant bought for its product, under one plan version. At most one live (not
+/// `CANCELLED`) subscription per tenant — a partial unique index. A cancelled subscription is kept
+/// for ever: it is the record of what was sold.
+model Subscription {
+  id               String    @id @db.Uuid
+  tenantLinkId     String    @map("tenant_link_id") @db.Uuid
+  planVersionId    String    @map("plan_version_id") @db.Uuid
+  /// The `@munaxa/licensing` lifecycle state as last recorded. Dates move it further; see `sweep`.
+  status           String
+  /// The state a `SUSPENDED` subscription returns to on reactivation.
+  suspendedFrom    String?   @map("suspended_from")
+  startsAt         DateTime  @map("starts_at") @db.Timestamptz(6)
+  trialEndsAt      DateTime? @map("trial_ends_at") @db.Timestamptz(6)
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz(6)
+  graceUntil       DateTime? @map("grace_until") @db.Timestamptz(6)
+  cancelledAt      DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  /// `{ "add": [feature…], "remove": [feature…] }` on top of the plan version.
+  featureOverrides Json      @default("{\"add\":[],\"remove\":[]}") @map("feature_overrides")
+  /// `{ "<limit key>": <integer> | null }`, replacing the plan's ceiling for that key.
+  limitOverrides   Json      @default("{}") @map("limit_overrides")
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String    @map("created_by")
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant      TenantLink          @relation(fields: [tenantLinkId], references: [id], onDelete: Restrict)
+  planVersion PlanVersion         @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  events      SubscriptionEvent[]
+  licences    Licence[]
+
+  @@index([status, expiresAt], map: "ix_subscription_status_expiry")
+  @@index([tenantLinkId], map: "ix_subscription_tenant")
+  @@map("subscription")
+}
+
+/// Every change to a subscription, in order. Append-only by grant.
+model SubscriptionEvent {
+  id                BigInt   @id @default(autoincrement())
+  subscriptionId    String   @map("subscription_id") @db.Uuid
+  event             String
+  fromStatus        String?  @map("from_status")
+  toStatus          String   @map("to_status")
+  fromPlanVersionId String?  @map("from_plan_version_id") @db.Uuid
+  toPlanVersionId   String   @map("to_plan_version_id") @db.Uuid
+  reason            String?
+  actor             String
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, id], map: "ix_subscription_event_subscription")
+  @@map("subscription_event")
+}
+
+/// An on-premises installation of a product, by the identifier its licence is bound to.
+model Installation {
+  id              String    @id @db.Uuid
+  tenantLinkId    String    @map("tenant_link_id") @db.Uuid
+  installationRef String    @map("installation_ref")
+  /// `ACTIVE`, or `REPLACED` once a reactivation moved the licence to another server.
+  status          String    @default("ACTIVE")
+  replacedById    String?   @map("replaced_by_id") @db.Uuid
+  registeredAt    DateTime  @default(now()) @map("registered_at") @db.Timestamptz(6)
+  registeredBy    String    @map("registered_by")
+  replacedAt      DateTime? @map("replaced_at") @db.Timestamptz(6)
+
+  tenant   TenantLink @relation(fields: [tenantLinkId], references: [id], onDelete: Restrict)
+  licences Licence[]
+
+  @@unique([installationRef], map: "uq_installation_ref")
+  @@index([tenantLinkId], map: "ix_installation_tenant")
+  @@map("installation")
+}
+
+/// A signed licence as issued. The token is what the customer installs; the payload is kept beside
+/// it so what was asserted is queryable without re-parsing.
+model Licence {
+  id             String    @id @db.Uuid
+  subscriptionId String    @map("subscription_id") @db.Uuid
+  installationId String?   @map("installation_id") @db.Uuid
+  kid            String
+  token          String
+  payload        Json
+  issuedAt       DateTime  @map("issued_at") @db.Timestamptz(6)
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  supersedesId   String?   @map("supersedes_id") @db.Uuid
+  issuedBy       String    @map("issued_by")
+  /// Recorded only. An offline installation cannot learn of a revocation (platform ADR-0022).
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason  String?   @map("revoked_reason")
+
+  subscription Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  installation Installation? @relation(fields: [installationId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId], map: "ix_licence_subscription")
+  @@map("licence")
+}
+
+/// A metered quantity a product reported. Informational: products enforce their own limits.
+/// Idempotent on (tenant, metric, measured_at), so a retried report is not counted twice.
+model UsageReport {
+  id              BigInt   @id @default(autoincrement())
+  tenantLinkId    String   @map("tenant_link_id") @db.Uuid
+  metric          String
+  value           BigInt
+  measuredAt      DateTime @map("measured_at") @db.Timestamptz(6)
+  installationRef String?  @map("installation_ref")
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  tenant TenantLink @relation(fields: [tenantLinkId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantLinkId, metric, measuredAt], map: "uq_usage_point")
+  @@index([tenantLinkId, metric, measuredAt(sort: Desc)], map: "ix_usage_latest")
+  @@map("usage_report")
+}
+
+/// Who did what, across the whole control plane. Append-only by grant: the runtime role can insert
+/// and read it and nothing else.
+model AuditEvent {
+  id             BigInt   @id @default(autoincrement())
+  at             DateTime @default(now()) @db.Timestamptz(6)
+  /// `OPERATOR`, `SERVICE` or `SYSTEM`.
+  actorKind      String   @map("actor_kind")
+  actor          String
+  action         String
+  customerId     String?  @map("customer_id") @db.Uuid
+  tenantLinkId   String?  @map("tenant_link_id") @db.Uuid
+  product        String?
+  subscriptionId String?  @map("subscription_id") @db.Uuid
+  licenceId      String?  @map("licence_id") @db.Uuid
+  installationId String?  @map("installation_id") @db.Uuid
+  payload        Json     @default("{}")
+  requestId      String?  @map("request_id")
+
+  @@index([at(sort: Desc)], map: "ix_audit_at")
+  @@index([customerId, at(sort: Desc)], map: "ix_audit_customer")
+  @@index([subscriptionId, at(sort: Desc)], map: "ix_audit_subscription")
+  @@map("audit_event")
+}
+
+/// The first answer to a mutating request under an `Idempotency-Key`, replayed for a retry.
+model IdempotencyRecord {
+  actor       String
+  key         String
+  method      String
+  path        String
+  requestHash String   @map("request_hash") @db.Char(64)
+  status      Int
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([actor, key])
+  @@index([createdAt], map: "ix_idempotency_created")
+  @@map("idempotency_record")
+}

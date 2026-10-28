@@ -1,0 +1,53 @@
+{
+  "name": "munaxa-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Munaxa Control — the Munaxa Group subscription and licensing control plane for Munaxa School, Work and Docs.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md,yml,yaml}\"",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test --concurrency=1",
+    "db:migrate": "node scripts/migrate.mjs",
+    "prisma:generate": "pnpm --filter @control/api exec prisma generate --schema ../../prisma/schema.prisma",
+    "keys:generate": "node scripts/generate-licence-signing-key.mjs",
+    "catalogue:emit": "node scripts/emit-permission-catalogue.mjs",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@munaxa/config-eslint": "^1.0.0",
+    "@munaxa/config-typescript": "^1.0.0",
+    "prettier": "^3.4.2",
+    "prisma": "6.19.3",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "@nestjs/core",
+      "sharp",
+      "unrs-resolver"
+    ],
+    "overrides": {
+      "multer": "^2.5.0",
+      "deepmerge-ts": "^8.0.2",
+      "postcss": "^8.5.25"
+    }
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3"
+  }
+}

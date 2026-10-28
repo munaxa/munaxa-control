@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '10.33.0'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Format · Lint · Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    # The API's guarantees live in the database — append-only grants, the plan-version trigger, the
+    # one-live-subscription index, idempotency claimed by primary key — so its tests need a real one,
+    # reached as the runtime role exactly as in production.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          # CI only: a throwaway cluster with no network exposure beyond the job.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      ADMIN_URL: postgresql://postgres@localhost:5432/postgres
+      TEST_DATABASE_URL: postgresql://control_app@localhost:5432/control
+      TEST_DATABASE_MIGRATION_URL: postgresql://control_owner@localhost:5432/control
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@munaxa'
+
+      # `@munaxa/*` is published from munaxa-platform to GitHub Packages. This repository's
+      # GITHUB_TOKEN reads it only if the packages have been granted to this repository;
+      # PLATFORM_PACKAGES_TOKEN is the named alternative, as in the product repositories.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Prisma generate
+        run: pnpm prisma:generate
+
+      # The documented procedure, unmodified: roles from infra/sql, then migrations as the owner,
+      # which also re-applies the runtime grants.
+      - name: Create the roles and the database
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -f infra/sql/roles.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE control OWNER control_owner'
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_MIGRATION_URL: ${{ env.TEST_DATABASE_MIGRATION_URL }}
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # The catalogue Identity seeds operator roles from must match the code that checks them.
+      - name: Permission catalogue is current
+        run: |
+          pnpm catalogue:emit
+          git diff --exit-code -- artifacts/control-permissions.json
+
+      # No known high or critical advisory ships. The overrides in package.json are each the only
+      # remedy for a pin a parent package holds; docs/dependency-advisories.md says which and why.
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+
+  image:
+    name: Build the images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      # Built, not pushed: publishing an image is a release step that needs its own authorisation.
+      - name: Build api, migrate and portal
+        run: |
+          set -euo pipefail
+          for target in api migrate portal; do
+            docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+              --target "$target" -t "munaxa-control-$target:ci" --load .
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}

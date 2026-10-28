@@ -675,6 +675,58 @@ describe('the audit trail', () => {
   });
 });
 
+describe('no route answers without a credential, but the probes and the public keys', () => {
+  const PUBLIC = new Set([
+    'GET /health/live',
+    'GET /health/ready',
+    'GET /api/v1/licensing/public-keys',
+  ]);
+
+  it('refuses every other route the application registers', async () => {
+    // Its own harness, so the failed-authentication lockout does not turn the 401s under test into
+    // 429s part-way through the walk.
+    const open = await startHarness({ AUTH_FAILURE_LIMIT_PER_MINUTE: '10000' });
+    try {
+      interface Layer {
+        route?: { path: string; methods: Record<string, boolean> };
+      }
+      const express = open.app.getHttpAdapter().getInstance() as { router: { stack: Layer[] } };
+      // A controller route declares its verbs; a layer that answers every verb is a catch-all
+      // the framework installs, not a route anyone wrote.
+      const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete']);
+      const routes = express.router.stack.flatMap((layer) => {
+        const methods = Object.keys(layer.route?.methods ?? {});
+        if (layer.route === undefined || methods.some((m) => !VERBS.has(m))) return [];
+        return methods.map((method) => ({
+          method: method.toUpperCase(),
+          path: layer.route?.path ?? '',
+        }));
+      });
+      // The walk is only evidence if it found the routes: every controller, not an empty list.
+      expect(routes.length).toBeGreaterThan(30);
+      expect(routes.some((r) => r.path.startsWith('/api/v1/admin/'))).toBe(true);
+      expect(routes.some((r) => r.path.startsWith('/api/v1/products/'))).toBe(true);
+
+      const answered: string[] = [];
+      for (const route of routes) {
+        const path = route.path.replace(/:[A-Za-z]+/g, () => randomUUID());
+        const call = open.http[route.method.toLowerCase() as 'get'](path).send({});
+        const response = await call;
+        const name = `${route.method} ${route.path}`;
+        if (PUBLIC.has(name)) {
+          expect(response.status, name).toBeLessThan(400);
+        } else if (response.status !== 401) {
+          answered.push(`${name} → ${String(response.status)}`);
+        }
+      }
+      expect(answered).toEqual([]);
+      expect(routes.filter((r) => PUBLIC.has(`${r.method} ${r.path}`))).toHaveLength(PUBLIC.size);
+    } finally {
+      await open.close();
+    }
+  });
+});
+
 describe('abuse protection (ADR-0007)', () => {
   let limited: Harness;
   beforeAll(async () => {

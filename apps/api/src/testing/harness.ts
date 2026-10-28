@@ -106,7 +106,7 @@ export async function startHarness(
     imports: [AppModule.with(environment, clock)],
   }).compile();
   const app = module.createNestApplication({ logger: false });
-  configureApplication(app);
+  configureApplication(app, environment);
   await app.init();
   const owner = new PrismaClient({ datasources: { db: { url: ownerUrl } } });
 

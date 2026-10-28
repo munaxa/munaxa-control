@@ -28,6 +28,9 @@ published (see the repository README).
 - **TLS everywhere outside the host.** Products refuse an `http://` `CONTROL_PLANE_URL` in production.
 - **The operator front door is not on the open internet** while operators have one factor (ADR-0006):
   restrict it to Munaxa Group's network or VPN at the load balancer or WAF.
+- **A rate rule at the front door as well.** The API limits each client per process (ADR-0007);
+  with several replicas the front door's per-address rule is the outer bound. Set
+  `TRUST_PROXY_HOPS` to the number of proxies in front so the API counts clients, not the balancer.
 
 ## Database
 
@@ -78,6 +81,9 @@ Build `pnpm --filter @control/api build`; run `node apps/api/dist/main.js` (or t
 | `LICENCE_SIGNING_KID`, `LICENCE_PREVIOUS_PUBLIC_KEYS`, `LICENCE_MAX_TERM_DAYS` | `licence-signing.md`                                                           |
 | `ENTITLEMENT_CACHE_SECONDS`                                                    | 30 — how long products may reuse an answer                                     |
 | `IDEMPOTENCY_RETENTION_HOURS`                                                  | 48                                                                             |
+| `TRUST_PROXY_HOPS`                                                             | `1` behind one load balancer; `0` (default) trusts no `X-Forwarded-For`        |
+| `RATE_LIMIT_PER_MINUTE`, `SERVICE_RATE_LIMIT_PER_MINUTE`                       | 600 per address, 6 000 per product credential (ADR-0007)                       |
+| `AUTH_FAILURE_LIMIT_PER_MINUTE`                                                | 20 refused credentials per address before it is refused for the minute         |
 
 Probes: liveness `GET /health/live`, readiness `GET /health/ready` (the database answers). Logs are
 JSON lines on stdout (pino) with the request id; authorization headers and secrets are redacted.

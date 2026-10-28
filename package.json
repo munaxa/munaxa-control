@@ -40,7 +40,12 @@
       "@nestjs/core",
       "sharp",
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "multer": "^2.5.0",
+      "deepmerge-ts": "^8.0.2",
+      "postcss": "^8.5.25"
+    }
   },
   "dependencies": {
     "@prisma/client": "6.19.3"

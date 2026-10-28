@@ -73,6 +73,19 @@ const schema = z.object({
   ENTITLEMENT_CACHE_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
   /** How long an `Idempotency-Key` answer is replayed. */
   IDEMPOTENCY_RETENTION_HOURS: z.coerce.number().int().min(1).max(720).default(48),
+
+  /** Requests per client address per minute, across every route but the probes (ADR-0007). */
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(600),
+  /** Requests per product service credential per minute: one deployment's whole fleet of tenants. */
+  SERVICE_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(6_000),
+  /** Refused credentials per client address per minute before that address is refused outright. */
+  AUTH_FAILURE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(20),
+  /**
+   * Proxies in front of this process whose `X-Forwarded-For` is trusted, nearest first: `1` behind
+   * one load balancer. `0` trusts none, and is the default, so a client cannot choose its own
+   * address by writing the header.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
 });
 
 export type RawEnvironment = z.infer<typeof schema>;

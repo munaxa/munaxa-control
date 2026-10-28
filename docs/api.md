@@ -44,6 +44,8 @@ detail — the cause is in the log under the request id.
 | `IDEMPOTENCY_KEY_REUSED`      | 409    | The key was used for a different request                                            |
 | `REQUEST_IN_PROGRESS`         | 409    | The first request with this key has not answered yet — retry shortly                |
 | `SECRET_NOT_REPLAYED`         | 409    | The request under this key succeeded, but its answer held a secret that is not kept |
+| `RATE_LIMITED`                | 429    | Too many requests from this client this minute; see `Retry-After` (ADR-0007)        |
+| `TOO_MANY_FAILED_ATTEMPTS`    | 429    | Too many refused credentials from this address this minute (ADR-0007)               |
 | `UNAUTHORIZED`                | 401    | No token or credential, or one that does not verify                                 |
 | `FORBIDDEN`                   | 403    | Authenticated, but without the permission this route declares                       |
 

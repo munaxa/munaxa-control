@@ -11,7 +11,7 @@ async function bootstrap(): Promise<void> {
   const environment = loadEnvironment(process.env);
   const application = await NestFactory.create(AppModule.with(environment), { bufferLogs: true });
   application.useLogger(application.get(Logger));
-  configureApplication(application);
+  configureApplication(application, environment);
   await application.listen(environment.PORT, environment.HOST);
 }
 

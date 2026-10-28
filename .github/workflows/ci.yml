@@ -105,6 +105,11 @@ jobs:
           pnpm catalogue:emit
           git diff --exit-code -- artifacts/control-permissions.json
 
+      # No known high or critical advisory ships. The overrides in package.json are each the only
+      # remedy for a pin a parent package holds; docs/dependency-advisories.md says which and why.
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+
   image:
     name: Build the images
     runs-on: ubuntu-latest

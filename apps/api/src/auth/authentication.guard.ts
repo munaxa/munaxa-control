@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { ENVIRONMENT, type Environment } from '../config/environment';
 import { CLOCK, type Clock } from '../core/clock';
 import { PrismaService } from '../core/prisma.service';
+import { RateLimiter } from '../core/rate-limit';
 import { AUDIENCE, PUBLIC_ROUTE, REQUIRED_PERMISSIONS } from './decorators';
 import { controlGrantsFrom, type ControlPermission } from './permissions';
 import type { AuthenticatedRequest, OperatorPrincipal, ServicePrincipal } from './principal';
@@ -45,6 +46,7 @@ export class AuthenticationGuard implements CanActivate {
     @Inject(ENVIRONMENT) private readonly environment: Environment,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {
     this.tokens = new TokenService({
       signer: new AsymmetricSigner(environment.OPERATOR_AUTH_ALGORITHM, [
@@ -58,6 +60,19 @@ export class AuthenticationGuard implements CanActivate {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    try {
+      return await this.authenticate(context);
+    } catch (error) {
+      // Every refused credential counts against its address (ADR-0007); a missing permission does
+      // not, since the caller proved who it is.
+      if (error instanceof UnauthorizedException) {
+        this.limiter.recordFailure(context.switchToHttp().getRequest<Request>());
+      }
+      throw error;
+    }
+  }
+
+  private async authenticate(context: ExecutionContext): Promise<boolean> {
     const targets = [context.getHandler(), context.getClass()];
     if (this.reflector.getAllAndOverride<string | undefined>(PUBLIC_ROUTE, targets) !== undefined)
       return true;

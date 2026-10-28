@@ -11,6 +11,7 @@ import { CLOCK, systemClock, type Clock } from './core/clock';
 import { ProblemFilter } from './core/errors';
 import { IdempotencyInterceptor } from './core/idempotency.interceptor';
 import { PrismaService } from './core/prisma.service';
+import { RateLimitGuard, RateLimiter } from './core/rate-limit';
 import { RequestIdMiddleware } from './core/request-id.middleware';
 import { CustomersController } from './customers/customers.controller';
 import { CustomersService } from './customers/customers.service';
@@ -33,7 +34,8 @@ import { UsageService } from './usage/usage.service';
  * The composition root. The environment and the clock are given, not read, so a test builds the
  * same application against its own database, keys and time.
  *
- * One global guard, closed by default (`auth/authentication.guard.ts`); one global filter that
+ * Two global guards, in order: the rate limiter (`core/rate-limit.ts`, ADR-0007), then the one
+ * authentication guard, closed by default (`auth/authentication.guard.ts`); one global filter that
  * answers every error as RFC 7807 problem details; and the idempotency interceptor, which needs the
  * principal the guard established and so runs after it.
  */
@@ -65,6 +67,8 @@ export class AppModule implements NestModule {
         EntitlementsService,
         UsageService,
         ReportsService,
+        RateLimiter,
+        { provide: APP_GUARD, useClass: RateLimitGuard },
         { provide: APP_GUARD, useClass: AuthenticationGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
         IdempotencyInterceptor,

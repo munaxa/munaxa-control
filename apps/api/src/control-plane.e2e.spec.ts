@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   decodeActivationRequest,
   encodeActivationRequest,
@@ -670,6 +672,90 @@ describe('the audit trail', () => {
     await expect(runtime.$executeRawUnsafe('DELETE FROM audit_event')).rejects.toThrow(
       /permission denied/,
     );
+  });
+});
+
+describe('abuse protection (ADR-0007)', () => {
+  let limited: Harness;
+  beforeAll(async () => {
+    limited = await startHarness({
+      RATE_LIMIT_PER_MINUTE: '3',
+      AUTH_FAILURE_LIMIT_PER_MINUTE: '2',
+    });
+  });
+  afterAll(async () => {
+    await limited.close();
+  });
+  beforeEach(() => {
+    // A fresh window for every test: the limiter's counts belong to the window, not the test.
+    limited.clock.set(new Date('2026-11-01T09:00:00.000Z'));
+    limited.clock.advanceDays(1);
+  });
+
+  const customers = (token = limited.token()) =>
+    limited.http.get('/api/v1/admin/customers').set(auth(token));
+
+  it('answers every request with headers that forbid caching, framing and sniffing', async () => {
+    const answer = await h.http.get('/api/v1/admin/customers').set(admin()).expect(200);
+    expect(answer.headers['cache-control']).toBe('no-store');
+    expect(answer.headers['x-content-type-options']).toBe('nosniff');
+    expect(answer.headers['x-frame-options']).toBe('DENY');
+    expect(answer.headers['content-security-policy']).toBe(
+      "default-src 'none'; frame-ancestors 'none'",
+    );
+    expect(answer.headers['x-powered-by']).toBeUndefined();
+    const probe = await h.http.get('/health/live').expect(200);
+    expect(probe.headers['cache-control']).toBe('no-store');
+  });
+
+  it('refuses a client past its budget until the window ends, and never refuses a probe', async () => {
+    for (let i = 0; i < 3; i += 1) await customers().expect(200);
+    const refused = await customers().expect(429);
+    expect(refused.body.code).toBe('RATE_LIMITED');
+    expect(Number(refused.headers['retry-after'])).toBeGreaterThan(0);
+    await limited.http.get('/health/live').expect(200);
+    limited.clock.set(new Date(limited.clock.now().getTime() + 60_000));
+    await customers().expect(200);
+  });
+
+  it('locks an address out after repeated refused credentials, valid ones included', async () => {
+    await customers(limited.forgedToken()).expect(401);
+    await customers(limited.forgedToken()).expect(401);
+    const lockedOut = await customers().expect(429);
+    expect(lockedOut.body.code).toBe('TOO_MANY_FAILED_ATTEMPTS');
+    // Guessing service credentials counts the same way, whatever id each guess invents.
+    limited.clock.set(new Date(limited.clock.now().getTime() + 60_000));
+    const guess = () =>
+      limited.http
+        .get('/api/v1/products/docs/tenants/019489f0-0000-7000-8000-0000000000a1/entitlements')
+        .set(auth(`mxc_${randomUUID()}_${'x'.repeat(43)}`));
+    await guess().expect(401);
+    await guess().expect(401);
+    await guess().expect(429);
+    limited.clock.set(new Date(limited.clock.now().getTime() + 60_000));
+    await customers().expect(200);
+  });
+
+  it('counts a product deployment by its credential, not by the address it calls from', async () => {
+    const deployment = await limited.http
+      .post('/api/v1/admin/deployments')
+      .set(auth(limited.token()))
+      .send({ product: 'docs', name: 'docs-eu-prod' })
+      .expect(201);
+    const credential = await limited.http
+      .post(`/api/v1/admin/deployments/${deployment.body.id as string}/credentials`)
+      .set(auth(limited.token()))
+      .send({ label: 'eu-prod api' })
+      .expect(201);
+    // The address has one request left; the deployment's own budget is untouched by it.
+    for (let i = 0; i < 5; i += 1) {
+      const answer = await limited.http
+        .get('/api/v1/products/docs/tenants/019489f0-0000-7000-8000-0000000000a1/entitlements')
+        .set(auth(credential.body.token as string));
+      expect(answer.status).not.toBe(429);
+    }
+    await customers().expect(200);
+    await customers().expect(429);
   });
 });
 

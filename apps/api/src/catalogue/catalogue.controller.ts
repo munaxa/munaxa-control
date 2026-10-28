@@ -1,7 +1,13 @@
 import { Body, Controller, Get, Inject, Param, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 
-import { CurrentOperator, ForOperators, RequestId, RequirePermission } from '../auth/decorators';
+import {
+  CurrentOperator,
+  ForOperators,
+  RequestId,
+  RequirePermission,
+  WithholdsSecret,
+} from '../auth/decorators';
 import { ControlPermission } from '../auth/permissions';
 import type { OperatorPrincipal } from '../auth/principal';
 import { uuidParam } from '../core/http';
@@ -67,6 +73,7 @@ export class CatalogueController {
   /** The response carries the secret, once. It is never retrievable again. */
   @Post('deployments/:id/credentials')
   @RequirePermission(ControlPermission.CREDENTIALS_MANAGE)
+  @WithholdsSecret()
   issueCredential(
     @CurrentOperator() operator: OperatorPrincipal,
     @Param('id', new ZodPipe(uuidParam)) id: string,

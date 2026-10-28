@@ -7,6 +7,7 @@ import {
 } from '@munaxa/licensing';
 
 import { ControlPermission } from './auth/permissions';
+import { IdempotencyInterceptor } from './core/idempotency.interceptor';
 import { PrismaService } from './core/prisma.service';
 import { startHarness, type Harness } from './testing/harness';
 
@@ -417,6 +418,49 @@ describe('idempotent retries', () => {
     expect(retry.headers['idempotent-replay']).toBe('true');
     expect(retry.body).toEqual(first.body);
     expect(await h.owner.planVersion.count({ where: { planId: w.plan.id } })).toBe(2);
+  });
+});
+
+describe('idempotent retries of a secret', () => {
+  it('a credential is issued once; its retry is refused and its secret is never kept', async () => {
+    const deployment = await post<{ id: string }>('/admin/deployments', {
+      product: 'docs',
+      name: 'docs-eu-prod',
+    });
+    const headers = { ...admin(), 'Idempotency-Key': 'issue-credential-0001' };
+    const path = `/api/v1/admin/deployments/${deployment.id}/credentials`;
+    const first = await h.http.post(path).set(headers).send({ label: 'eu-prod api' }).expect(201);
+    expect(first.body.token).toMatch(/^mxc_/);
+    const retry = await h.http.post(path).set(headers).send({ label: 'eu-prod api' });
+    expect(retry.status).toBe(409);
+    expect(retry.body.code).toBe('SECRET_NOT_REPLAYED');
+    expect(JSON.stringify(retry.body)).not.toContain(first.body.token);
+    const stored = await h.owner.$queryRaw<{ response: string }[]>`
+      SELECT response::text AS response FROM idempotency_record`;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.response).not.toContain('mxc_');
+    expect(stored[0]?.response).toContain(first.body.id);
+    expect(await h.owner.serviceCredential.count()).toBe(1);
+  });
+  it('the sweep deletes records past retention and keeps the rest', async () => {
+    const w = await world();
+    const body = { tenantLinkId: w.tenant.id, planVersionId: w.version.id, start: 'ACTIVE' };
+    await h.http
+      .post('/api/v1/admin/subscriptions')
+      .set({ ...admin(), 'Idempotency-Key': 'create-sub-0002' })
+      .send(body)
+      .expect(201);
+    const interceptor = h.app.get(IdempotencyInterceptor);
+    // Stamped against the harness clock, not the database's.
+    await h.owner.idempotencyRecord.updateMany({ data: { createdAt: h.clock.now() } });
+    const before = await h.owner.idempotencyRecord.count();
+    expect(before).toBeGreaterThan(0);
+    expect(await interceptor.purgeExpired()).toBe(0);
+    await h.owner.idempotencyRecord.updateMany({
+      data: { createdAt: new Date(h.clock.now().getTime() - 49 * 3_600_000) },
+    });
+    expect(await interceptor.purgeExpired()).toBe(before);
+    expect(await h.owner.idempotencyRecord.count()).toBe(0);
   });
 });
 

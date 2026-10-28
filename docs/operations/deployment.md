@@ -90,7 +90,8 @@ versions) is in the database.
 `node apps/api/dist/sweep.js` records the status moves term dates have already made (trial ended,
 term ended, grace ended) in the subscription history. Products never depend on it — each snapshot's
 status is computed from dates at the moment it is served — but the portal's lists, reports and the
-audit trail do. Run it **hourly** from the platform scheduler (a cron job or scheduled task with the
+audit trail do. It also deletes idempotency records older than `IDEMPOTENCY_RETENTION_HOURS`
+(ADR-0004). Run it **hourly** from the platform scheduler (a cron job or scheduled task with the
 API's image and environment); it is idempotent and safe to overlap. It exits non-zero on failure:
 alert on that.
 

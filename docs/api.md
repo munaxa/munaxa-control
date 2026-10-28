@@ -22,36 +22,41 @@ line for that request carries it too.
 `code` is stable and is what a client branches on; `detail` is for people. A `5xx` never carries a
 detail — the cause is in the log under the request id.
 
-| Code                          | Status | Meaning                                                                           |
-| ----------------------------- | ------ | --------------------------------------------------------------------------------- |
-| `VALIDATION_FAILED`           | 422    | The body, query or path failed its schema; `issues` lists each failure            |
-| `NOT_FOUND`                   | 404    | No such record — or one this caller may not know exists                           |
-| `DUPLICATE`                   | 409    | A unique key is taken (a plan code, a tenant already linked, a deployment name)   |
-| `RULE_VIOLATED`               | 409    | A database rule refused the change (a check constraint, the plan-version trigger) |
-| `VERSION_CONFLICT`            | 409    | `expectedVersion` is stale: someone else changed the record. Read it again        |
-| `INVALID_TRANSITION`          | 409    | The lifecycle (or a plan version's state) does not allow that move from here      |
-| `SUBSCRIPTION_EXISTS`         | 409    | The tenant already has a subscription that is not cancelled                       |
-| `PLAN_VERSION_NOT_PUBLISHED`  | 409    | Only a published version can be sold or moved to                                  |
-| `PLAN_VERSION_FROZEN`         | 409    | Published and retired terms never change; draft a new version                     |
-| `CUSTOMER_CLOSED`             | 409    | A closed customer takes no new tenants or subscriptions                           |
-| `NO_CHANGE`                   | 409    | The request would change nothing (the same plan version, say)                     |
-| `SUBSCRIPTION_NOT_LICENSABLE` | 409    | Licences are for on-premises tenants on a live subscription                       |
-| `SUBSCRIPTION_HAS_NO_END`     | 409    | A licence needs an end; give the subscription or the licence one                  |
-| `INSTALLATION_NOT_ACTIVE`     | 409    | The installation was replaced, or belongs to another tenant                       |
-| `INSTALLATION_TAKEN`          | 409    | That installation reference is registered to another tenant                       |
-| `LICENCE_REVOKED`             | 409    | The licence is already revoked                                                    |
-| `INVALID_IDEMPOTENCY_KEY`     | 400    | `Idempotency-Key` must be 8–128 URL-safe characters                               |
-| `IDEMPOTENCY_KEY_REUSED`      | 409    | The key was used for a different request                                          |
-| `REQUEST_IN_PROGRESS`         | 409    | The first request with this key has not answered yet — retry shortly              |
-| `UNAUTHORIZED`                | 401    | No token or credential, or one that does not verify                               |
-| `FORBIDDEN`                   | 403    | Authenticated, but without the permission this route declares                     |
+| Code                          | Status | Meaning                                                                             |
+| ----------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| `VALIDATION_FAILED`           | 422    | The body, query or path failed its schema; `issues` lists each failure              |
+| `NOT_FOUND`                   | 404    | No such record — or one this caller may not know exists                             |
+| `DUPLICATE`                   | 409    | A unique key is taken (a plan code, a tenant already linked, a deployment name)     |
+| `RULE_VIOLATED`               | 409    | A database rule refused the change (a check constraint, the plan-version trigger)   |
+| `VERSION_CONFLICT`            | 409    | `expectedVersion` is stale: someone else changed the record. Read it again          |
+| `INVALID_TRANSITION`          | 409    | The lifecycle (or a plan version's state) does not allow that move from here        |
+| `SUBSCRIPTION_EXISTS`         | 409    | The tenant already has a subscription that is not cancelled                         |
+| `PLAN_VERSION_NOT_PUBLISHED`  | 409    | Only a published version can be sold or moved to                                    |
+| `PLAN_VERSION_FROZEN`         | 409    | Published and retired terms never change; draft a new version                       |
+| `CUSTOMER_CLOSED`             | 409    | A closed customer takes no new tenants or subscriptions                             |
+| `NO_CHANGE`                   | 409    | The request would change nothing (the same plan version, say)                       |
+| `SUBSCRIPTION_NOT_LICENSABLE` | 409    | Licences are for on-premises tenants on a live subscription                         |
+| `SUBSCRIPTION_HAS_NO_END`     | 409    | A licence needs an end; give the subscription or the licence one                    |
+| `INSTALLATION_NOT_ACTIVE`     | 409    | The installation was replaced, or belongs to another tenant                         |
+| `INSTALLATION_TAKEN`          | 409    | That installation reference is registered to another tenant                         |
+| `LICENCE_REVOKED`             | 409    | The licence is already revoked                                                      |
+| `INVALID_IDEMPOTENCY_KEY`     | 400    | `Idempotency-Key` must be 8–128 URL-safe characters                                 |
+| `IDEMPOTENCY_KEY_REUSED`      | 409    | The key was used for a different request                                            |
+| `REQUEST_IN_PROGRESS`         | 409    | The first request with this key has not answered yet — retry shortly                |
+| `SECRET_NOT_REPLAYED`         | 409    | The request under this key succeeded, but its answer held a secret that is not kept |
+| `UNAUTHORIZED`                | 401    | No token or credential, or one that does not verify                                 |
+| `FORBIDDEN`                   | 403    | Authenticated, but without the permission this route declares                       |
 
 **Idempotency.** Every mutating request may carry `Idempotency-Key`. The key is _claimed before the
 request runs_, atomically: a duplicate while the first runs gets `409 REQUEST_IN_PROGRESS`; once the
 first has answered, the same key and body replays that answer with `Idempotent-Replay: true`; the
 same key with a different body is `409 IDEMPOTENCY_KEY_REUSED`. A request whose action fails
 releases its key; one whose action succeeded never does. Keys are scoped per caller and kept for
-`IDEMPOTENCY_RETENTION_HOURS`. The portal sends one with every form.
+`IDEMPOTENCY_RETENTION_HOURS` and then deleted by the sweep. The portal sends one with every form.
+An answer that holds a secret (issuing a service credential) is never stored: its record keeps only
+that the request succeeded and the new credential's `id`, and a retry under the same key is
+`409 SECRET_NOT_REPLAYED` with that `id` in `details`. A caller that lost the secret revokes that
+credential and issues another.
 
 **Optimistic concurrency.** Customers and subscriptions carry `version`; changes send
 `expectedVersion` and get `409 VERSION_CONFLICT` when it is stale. Nothing is ever overwritten

@@ -11,6 +11,7 @@ import type {
 export const AUDIENCE = 'control:audience';
 export const REQUIRED_PERMISSIONS = 'control:permissions';
 export const PUBLIC_ROUTE = 'control:public';
+export const WITHHOLDS_SECRET = 'control:withholds-secret';
 
 /**
  * Who a controller serves. Every controller declares one — the guard refuses a route that does
@@ -28,6 +29,13 @@ export const RequirePermission = (
 /** Reachable with no credential; the reason is mandatory and says why. */
 export const Public = (reason: string): MethodDecorator & ClassDecorator =>
   SetMetadata(PUBLIC_ROUTE, reason);
+
+/**
+ * The response carries a secret shown once (a new service credential). Its idempotency record keeps
+ * only the response's `id`, never the body, and a replay is told the request succeeded rather than
+ * shown the secret again: a secret at rest in a retry table is a secret stored.
+ */
+export const WithholdsSecret = (): MethodDecorator => SetMetadata(WITHHOLDS_SECRET, true);
 
 export const CurrentOperator = createParamDecorator(
   (_: unknown, context: ExecutionContext): OperatorPrincipal => {

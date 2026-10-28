@@ -7,10 +7,12 @@ import {
   Injectable,
   type NestInterceptor,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { catchError, from, type Observable, of, switchMap, throwError } from 'rxjs';
 
+import { WITHHOLDS_SECRET } from '../auth/decorators';
 import { actorOf, type AuthenticatedRequest } from '../auth/principal';
 import { ENVIRONMENT, type Environment } from '../config/environment';
 import { CLOCK, type Clock } from './clock';
@@ -41,6 +43,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ENVIRONMENT) private readonly environment: Environment,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(Reflector) private readonly reflector: Reflector,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
@@ -65,6 +68,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
       .digest('hex');
     const response = http.getResponse<Response>();
     const where = { actor_key: { actor, key } };
+    const withholds =
+      this.reflector.get<boolean | undefined>(WITHHOLDS_SECRET, context.getHandler()) === true;
 
     return from(this.claim(actor, key, request.method, path, requestHash)).pipe(
       switchMap((existing) => {
@@ -81,6 +86,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
               409,
               'REQUEST_IN_PROGRESS',
               'The first request with this key has not answered yet. Retry shortly.',
+            );
+          }
+          if (isWithheld(existing.response)) {
+            throw new AppError(
+              409,
+              'SECRET_NOT_REPLAYED',
+              'This request already succeeded. Its secret was shown once and is not kept; revoke it and issue another if it was lost.',
+              { id: existing.response.id },
             );
           }
           response.status(existing.status).setHeader('idempotent-replay', 'true');
@@ -101,9 +114,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
                 where,
                 data: {
                   status: response.statusCode,
-                  response: (body === undefined
-                    ? {}
-                    : JSON.parse(JSON.stringify(body, bigintReplacer))) as Prisma.InputJsonValue,
+                  response: (withholds
+                    ? withheld(body)
+                    : body === undefined
+                      ? {}
+                      : JSON.parse(JSON.stringify(body, bigintReplacer))) as Prisma.InputJsonValue,
                 },
               }),
             ).pipe(switchMap(() => of(body))),
@@ -111,6 +126,20 @@ export class IdempotencyInterceptor implements NestInterceptor {
         );
       }),
     );
+  }
+
+  /**
+   * Deletes the records past retention. A record is only ever needed while its key may be retried;
+   * after that it is a copy of a response nobody will ask for again. Run by the sweep.
+   */
+  async purgeExpired(): Promise<number> {
+    const cutoff = new Date(
+      this.clock.now().getTime() - this.environment.IDEMPOTENCY_RETENTION_HOURS * 3_600_000,
+    );
+    const { count } = await this.prisma.idempotencyRecord.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+    return count;
   }
 
   /** `null` when this request now owns the key; otherwise the record that already holds it. */
@@ -152,4 +181,21 @@ export class IdempotencyInterceptor implements NestInterceptor {
       return this.prisma.idempotencyRecord.findUniqueOrThrow({ where });
     }
   }
+}
+
+/** What a secret-bearing response leaves in its idempotency record: that it happened, and its id. */
+function withheld(body: unknown): { readonly secretWithheld: true; readonly id: string | null } {
+  const id =
+    typeof body === 'object' && body !== null && typeof (body as { id?: unknown }).id === 'string'
+      ? (body as { id: string }).id
+      : null;
+  return { secretWithheld: true, id };
+}
+
+function isWithheld(value: unknown): value is { secretWithheld: true; id: string | null } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { secretWithheld?: unknown }).secretWithheld === true
+  );
 }

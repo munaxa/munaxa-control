@@ -21,9 +21,18 @@ networks retry, operators click again.
 4. Records expire after `IDEMPOTENCY_RETENTION_HOURS`, judged by the application clock that stamped
    them.
 5. Separately, changes to customers and subscriptions carry `expectedVersion`.
+6. **A secret is never stored for replay.** A handler marked `@WithholdsSecret()` (credential
+   issuance) records `{ secretWithheld: true, id }` in place of its answer, and a retry under its key
+   is `409 SECRET_NOT_REPLAYED` naming that `id`. A pre-release review found the earlier behaviour
+   kept every issued credential's token in plaintext in `idempotency_record`; the
+   `20261027100000_withhold_secrets` migration rewrites any such record to the withheld shape.
+7. Expired records are deleted by the sweep, not only when their key is next used, so nothing an
+   answer held outlives retention.
 
 ## Consequences
 
 - Concurrent duplicates are tested: ten simultaneous requests under one key create one subscription.
 - A crash between the action and recording its answer leaves the key unusable until it expires; the
   action itself is visible in the audit trail.
+- A credential whose first answer was lost in transit cannot be recovered by retrying; it is revoked
+  and replaced. That is the price of the token existing only in the caller's hands.

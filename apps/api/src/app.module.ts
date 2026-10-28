@@ -67,7 +67,8 @@ export class AppModule implements NestModule {
         ReportsService,
         { provide: APP_GUARD, useClass: AuthenticationGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
-        { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
+        IdempotencyInterceptor,
+        { provide: APP_INTERCEPTOR, useExisting: IdempotencyInterceptor },
       ],
     };
   }

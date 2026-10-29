@@ -283,12 +283,13 @@ export const revokeLicence = action(async (data, key) => {
   await apiSend(
     'POST',
     `/admin/licences/${required(data, 'licenceId')}/revoke`,
-    { reason: required(data, 'reason') },
+    { reason: required(data, 'reason'), category: required(data, 'category') },
     key,
   );
   revalidatePath(`/subscriptions/${subscriptionId}`);
   return {
-    message: 'Revocation recorded. An offline installation keeps the licence until it ends.',
+    message:
+      'Revocation recorded. An offline installation applies it once it receives the new revocation list.',
   };
 });
 

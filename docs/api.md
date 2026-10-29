@@ -187,14 +187,15 @@ status allows are accepted (`INVALID_TRANSITION` otherwise).
 
 ### Licences and installations (on premises)
 
-| Route                                     | Permission         | Body                                                                                                                                                  |
-| ----------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /admin/tenants/{id}/installations`   | subscriptions:read | —                                                                                                                                                     |
-| `POST /admin/tenants/{id}/installations`  | licences:issue     | `installationRef`                                                                                                                                     |
-| `POST /admin/subscriptions/{id}/licences` | licences:issue     | `installationRef` (or `null` for an unbound licence, at most 30 days), `expiresAt?` — capped at the subscription's end and at `LICENCE_MAX_TERM_DAYS` |
-| `POST /admin/activations`                 | licences:issue     | `code`: an activation request an installation produced (`ACTIVATION`, `RENEWAL` or `SERVER_REPLACEMENT`). Answers the issued licence                  |
-| `POST /admin/licences/{id}/revoke`        | licences:issue     | `reason`. Recorded, and refused for renewal; an offline installation keeps the licence until it ends                                                  |
-| `GET /admin/licences/{id}/download`       | licences:issue     | the armoured `mxl1` licence file                                                                                                                      |
+| Route                                           | Permission         | Body                                                                                                                                                               |
+| ----------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /admin/tenants/{id}/installations`         | subscriptions:read | —                                                                                                                                                                  |
+| `POST /admin/tenants/{id}/installations`        | licences:issue     | `installationRef`                                                                                                                                                  |
+| `POST /admin/subscriptions/{id}/licences`       | licences:issue     | `installationRef` (or `null` for an unbound licence, at most 30 days), `expiresAt?` — capped at the subscription's end and at `LICENCE_MAX_TERM_DAYS`              |
+| `POST /admin/activations`                       | licences:issue     | `code`: an activation request an installation produced (`ACTIVATION`, `RENEWAL` or `SERVER_REPLACEMENT`). Answers the issued licence                               |
+| `POST /admin/licences/{id}/revoke`              | licences:issue     | `reason`, `category` (`CONTRACT_ENDED`, `ISSUED_IN_ERROR`, `SUPERSEDED`, `KEY_COMPROMISE`). Final; refused for renewal, and named in the product's revocation list |
+| `GET /admin/products/{product}/revocation-list` | licences:issue     | The signed, cumulative revocation list (`mxr1`) for the product, audited. Deliver to offline installations as `LICENSE_REVOCATION_PATH`                            |
+| `GET /admin/licences/{id}/download`             | licences:issue     | the armoured `mxl1` licence file                                                                                                                                   |
 
 ### Reports and audit
 

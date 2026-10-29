@@ -228,9 +228,12 @@ model Licence {
   expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
   supersedesId   String?   @map("supersedes_id") @db.Uuid
   issuedBy       String    @map("issued_by")
-  /// Recorded only. An offline installation cannot learn of a revocation (platform ADR-0022).
-  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
-  revokedReason  String?   @map("revoked_reason")
+  /// Reaches an offline installation only through a signed revocation list (platform ADR-0022),
+  /// which names every revoked licence of the product. Never cleared once set.
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason   String?   @map("revoked_reason")
+  /// The `RevocationReason` the list states; the free-text reason stays in Control.
+  revokedCategory String?   @map("revoked_category")
 
   subscription Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
   installation Installation? @relation(fields: [installationId], references: [id], onDelete: Restrict)

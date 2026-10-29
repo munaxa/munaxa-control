@@ -274,8 +274,9 @@ export default async function SubscriptionPage({
           <CardHeader>
             <CardTitle>Licences</CardTitle>
             <CardDescription>
-              Signed here, verified offline by the installation with the public key. A licence
-              cannot be revoked offline: keep terms short.
+              Signed here, verified offline by the installation with the public key. A revocation
+              reaches an offline installation only with the revocation list, delivered like a
+              licence file — until then the licence keeps working, so keep terms short.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -358,11 +359,25 @@ export default async function SubscriptionPage({
                       ))}
                   </Select>
                 </Field>
+                <Field label="Category" htmlFor="revoke-category" required>
+                  <Select id="revoke-category" name="category" required>
+                    <option value="CONTRACT_ENDED">Contract ended early</option>
+                    <option value="ISSUED_IN_ERROR">Issued in error</option>
+                    <option value="SUPERSEDED">Superseded</option>
+                    <option value="KEY_COMPROMISE">Signing key compromised</option>
+                  </Select>
+                </Field>
                 <Field label="Reason" htmlFor="revoke-reason" required>
                   <Input id="revoke-reason" name="reason" required minLength={3} maxLength={500} />
                 </Field>
               </ActionForm>
             )}
+            <p>
+              <a href={`/products/${s.tenant.product}/revocation-list`} download>
+                Download the {s.tenant.product} revocation list
+              </a>{' '}
+              — every revoked licence of the product, signed. Install it next to the licence file.
+            </p>
           </CardContent>
         </Card>
       )}

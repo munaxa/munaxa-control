@@ -20,7 +20,7 @@
   "dependencies": {
     "@munaxa/auth": "^2.4.1",
     "@munaxa/crypto": "^2.4.1",
-    "@munaxa/licensing": "^0.1.0",
+    "@munaxa/licensing": "^0.2.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",

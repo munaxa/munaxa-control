@@ -13,7 +13,7 @@ import { ControlPermission } from '../auth/permissions';
 import type { OperatorPrincipal } from '../auth/principal';
 import { isoDate, reasonSchema, uuidParam } from '../core/http';
 import { ZodPipe } from '../core/validation';
-import { LicensingService } from './licensing.service';
+import { LicensingService, REVOCATION_CATEGORIES } from './licensing.service';
 
 const installationRef = z.string().trim().min(1).max(128);
 const issueBody = z.object({
@@ -22,7 +22,8 @@ const issueBody = z.object({
 });
 const registerBody = z.object({ installationRef });
 const activationBody = z.object({ code: z.string().trim().min(16).max(4_096) });
-const revokeBody = z.object({ reason: reasonSchema });
+const revokeBody = z.object({ reason: reasonSchema, category: z.enum(REVOCATION_CATEGORIES) });
+const productParam = z.string().regex(/^[a-z][a-z0-9-]{1,31}$/);
 
 @Controller({ path: 'admin' })
 @ForOperators()
@@ -76,7 +77,27 @@ export class LicensingAdminController {
     @Body(new ZodPipe(revokeBody)) body: z.infer<typeof revokeBody>,
     @RequestId() requestId?: string,
   ) {
-    return this.licensing.revoke(operator, id, body.reason, requestId);
+    return this.licensing.revoke(operator, id, body.reason, body.category, requestId);
+  }
+
+  /**
+   * The product's signed revocation list, for installations that cannot reach this service: every
+   * licence of the product ever revoked. Delivered like a licence file, next to it.
+   */
+  @Get('products/:product/revocation-list')
+  @RequirePermission(ControlPermission.LICENCES_ISSUE)
+  @Header('Cache-Control', 'no-store')
+  async revocationList(
+    @CurrentOperator() operator: OperatorPrincipal,
+    @Param('product', new ZodPipe(productParam)) product: string,
+    @Res() response: Response,
+    @RequestId() requestId?: string,
+  ): Promise<void> {
+    const file = await this.licensing.revocationList(operator, product, requestId);
+    response
+      .type('application/x-munaxa-revocation-list')
+      .setHeader('Content-Disposition', `attachment; filename="${file.filename}"`)
+      .send(file.body);
   }
 
   @Get('licences/:id/download')

@@ -9,6 +9,9 @@ import {
   decodeActivationRequest,
   effectiveStatus,
   issueLicense,
+  issueRevocationList,
+  REVOCATION_LIST_FORMAT,
+  RevocationReason,
   type LicensePayload,
 } from '@munaxa/licensing';
 import type { Prisma } from '@prisma/client';
@@ -24,6 +27,16 @@ import { snapshotOf } from '../entitlements/snapshot';
 import { termOf } from '../subscriptions/subscriptions.service';
 
 const DAY = 86_400_000;
+const EPOCH = '1970-01-01T00:00:00.000Z';
+
+/** Why a licence was revoked, as a revocation list states it (never the list's fail-closed reason). */
+export const REVOCATION_CATEGORIES = [
+  RevocationReason.ISSUED_IN_ERROR,
+  RevocationReason.SUPERSEDED,
+  RevocationReason.CONTRACT_ENDED,
+  RevocationReason.KEY_COMPROMISE,
+] as const;
+export type RevocationCategory = (typeof REVOCATION_CATEGORIES)[number];
 const WITH_TERMS = { tenant: true, planVersion: { include: { plan: true } } } as const;
 
 export interface PublishedKey {
@@ -214,7 +227,13 @@ export class LicensingService {
     });
   }
 
-  revoke(principal: Principal, licenceId: string, reason: string, requestId?: string) {
+  revoke(
+    principal: Principal,
+    licenceId: string,
+    reason: string,
+    category: RevocationCategory,
+    requestId?: string,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       const licence = await tx.licence.findUnique({
         where: { id: licenceId },
@@ -224,7 +243,7 @@ export class LicensingService {
       if (licence.revokedAt === null) {
         await tx.licence.update({
           where: { id: licenceId },
-          data: { revokedAt: this.clock.now(), revokedReason: reason },
+          data: { revokedAt: this.clock.now(), revokedReason: reason, revokedCategory: category },
         });
         await this.audit.record(
           tx,
@@ -238,7 +257,8 @@ export class LicensingService {
             licenceId,
             payload: {
               reason,
-              note: 'Recorded only: an offline installation keeps a valid licence until it ends.',
+              category,
+              note: 'Reaches an offline installation only with the next revocation list it receives.',
             },
           },
           requestId,
@@ -246,6 +266,49 @@ export class LicensingService {
       }
       return { id: licenceId, revoked: true };
     });
+  }
+
+  /**
+   * The product's revocation list, signed with the licence key: every licence of the product ever
+   * revoked. Cumulative, and numbered by how many there are (plus one, so an empty list is 1 and the
+   * first revocation makes 2) — a revocation is never undone, so the number only grows and a list
+   * an installation holds is never replaced by an older one. Its `issuedAt` is the latest revocation
+   * it names, so it is never later than the installation's clock.
+   */
+  async revocationList(
+    principal: Principal,
+    product: string,
+    requestId?: string,
+  ): Promise<{ filename: string; body: string; sequence: number }> {
+    const revoked = await this.prisma.licence.findMany({
+      where: { revokedAt: { not: null }, subscription: { tenant: { product } } },
+      select: { id: true, revokedAt: true, revokedCategory: true },
+      orderBy: { id: 'asc' },
+    });
+    const entries = revoked.map((licence) => ({
+      licenseId: licence.id,
+      revokedAt: (licence.revokedAt as Date).toISOString(),
+      reason: (licence.revokedCategory ?? RevocationReason.CONTRACT_ENDED) as RevocationReason,
+    }));
+    const latest = entries.reduce((max, e) => (e.revokedAt > max ? e.revokedAt : max), EPOCH);
+    const sequence = entries.length + 1;
+    const body = issueRevocationList(
+      { format: REVOCATION_LIST_FORMAT, product, sequence, issuedAt: latest, revoked: entries },
+      this.signer,
+    );
+    await this.prisma.$transaction((tx) =>
+      this.audit.record(
+        tx,
+        principal,
+        {
+          action: AuditAction.REVOCATION_LIST_ISSUED,
+          product,
+          payload: { sequence, revoked: entries.length },
+        },
+        requestId,
+      ),
+    );
+    return { filename: `${product}-revocations-${sequence}.mxr`, body: `${body}\n`, sequence };
   }
 
   async download(licenceId: string): Promise<{ filename: string; body: string }> {

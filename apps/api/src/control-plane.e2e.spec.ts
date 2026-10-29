@@ -6,6 +6,9 @@ import {
   licenseVerifier,
   parseEntitlementSnapshot,
   verifyLicense,
+  applyRevocation,
+  resolveRevocationList,
+  revocationInForce,
 } from '@munaxa/licensing';
 
 import { ControlPermission } from './auth/permissions';
@@ -600,6 +603,86 @@ describe('on-premises licences', () => {
       .set(admin())
       .send({ installationRef: 'inst-old' });
     expect(again.body.code).toBe('INSTALLATION_NOT_ACTIVE');
+  });
+
+  it('a revoked licence reaches an offline installation in a signed list, and suspends it there', async () => {
+    const { tenant, subscription } = await onPremises();
+    await post(`/admin/tenants/${tenant.id}/installations`, { installationRef: 'inst-revoked' });
+    const issued = await post<{ id: string }>(`/admin/subscriptions/${subscription.id}/licences`, {
+      installationRef: 'inst-revoked',
+    });
+    const download = (product = 'school') =>
+      h.http.get(`/api/v1/admin/products/${product}/revocation-list`).set(admin());
+    const verifier = await verifierFrom();
+    const opts = { verifier, product: 'school', now: h.clock.now() };
+
+    const before = await download().expect(200);
+    const empty = resolveRevocationList(before.text, null, opts);
+    expect(empty.rejected).toBeNull();
+    const startSequence = empty.list?.sequence ?? 0;
+    expect(empty.list?.revoked.some((e) => e.licenseId === issued.id)).toBe(false);
+
+    // A category is required: the list states why in a fixed vocabulary.
+    await h.http
+      .post(`/api/v1/admin/licences/${issued.id}/revoke`)
+      .set(admin())
+      .send({ reason: 'Refunded in full' })
+      .expect(422);
+    await post(`/admin/licences/${issued.id}/revoke`, {
+      reason: 'Refunded in full',
+      category: 'CONTRACT_ENDED',
+    });
+
+    const after = await download().expect(200);
+    expect(after.headers['cache-control']).toBe('no-store');
+    // The installation persisted the earlier list; the new one is newer, so it is taken.
+    const r = resolveRevocationList(after.text, before.text.trim(), opts);
+    expect(r.list?.sequence).toBe(startSequence + 1);
+    expect(r.persist).not.toBeNull();
+    const file = await h.http.get(`/api/v1/admin/licences/${issued.id}/download`).set(admin());
+    const licence = verifyLicense(file.text, { ...opts, installationId: 'inst-revoked' });
+    expect(licence.ok).toBe(true);
+    if (!licence.ok) return;
+    const entry = revocationInForce(licence.license, r, h.clock.now());
+    expect(entry).toMatchObject({ licenseId: issued.id, reason: 'CONTRACT_ENDED' });
+    expect(applyRevocation(licence.snapshot, entry).status).toBe('SUSPENDED');
+
+    // Offering the older list afterwards changes nothing.
+    const stale = resolveRevocationList(before.text, r.persist, opts);
+    expect(stale.list?.sequence).toBe(startSequence + 1);
+    expect(stale.persist).toBeNull();
+
+    // Revoking twice is one revocation: the list does not grow.
+    await post(`/admin/licences/${issued.id}/revoke`, {
+      reason: 'again',
+      category: 'CONTRACT_ENDED',
+    });
+    expect(resolveRevocationList((await download()).text, null, opts).list?.sequence).toBe(
+      startSequence + 1,
+    );
+
+    // Another product's list does not name it, and the issue is audited.
+    const work = resolveRevocationList((await download('work')).text, null, {
+      ...opts,
+      product: 'work',
+    });
+    expect(work.list?.revoked.some((e) => e.licenseId === issued.id)).toBe(false);
+    const audit = await h.app.get(PrismaService).auditEvent.findMany({
+      where: { action: 'control.revocation_list.issued', product: 'school' },
+    });
+    expect(audit.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the revocation list needs licence-issuing permission', async () => {
+    await h.http
+      .get('/api/v1/admin/products/school/revocation-list')
+      .set(auth(h.token([ControlPermission.SUBSCRIPTIONS_READ])))
+      .expect(403);
+    await h.http.get('/api/v1/admin/products/school/revocation-list').expect(401);
+    await h.http
+      .get('/api/v1/admin/products/NOT%20A%20PRODUCT/revocation-list')
+      .set(admin())
+      .expect(422);
   });
 
   it('refuses a licence for a SaaS tenant or a suspended subscription', async () => {

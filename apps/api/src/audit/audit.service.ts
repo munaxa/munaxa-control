@@ -17,6 +17,7 @@ export const AuditAction = {
   PLAN_CREATED: 'control.plan.created',
   PLAN_VERSION_DRAFTED: 'control.plan_version.drafted',
   ENTITLEMENT_SERVED: 'control.entitlement.served',
+  REVOCATION_LIST_ISSUED: 'control.revocation_list.issued',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 

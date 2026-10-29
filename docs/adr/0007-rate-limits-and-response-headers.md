@@ -32,6 +32,13 @@ credentials at line rate, or from spending the database on requests that would b
    - `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`;
    - `Cross-Origin-Resource-Policy: same-origin`;
    - `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
+6. **The operator portal sends its own policy**, per request around a fresh nonce
+   (`apps/portal/src/lib/csp.ts`, set in `middleware.ts`): scripts run only with the nonce
+   (`'strict-dynamic'`, never `'unsafe-inline'` or, outside the dev server, `'unsafe-eval'`), and
+   `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`, `connect-src 'self'`,
+   `frame-ancestors 'none'`. Every page renders per request so every response can carry its nonce.
+   Checked against a production build in Chromium: an inline script, an external script and an
+   inline event handler injected into the HTML were all refused, and the application still ran.
 
 The limiter is in-process, written here rather than added as a dependency: fixed one-minute
 windows on the injected clock, so tests move time instead of waiting, with at most 50 000 tracked

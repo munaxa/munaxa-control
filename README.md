@@ -74,5 +74,5 @@ TEST_DATABASE_MIGRATION_URL=postgresql://control_owner@…/control_test pnpm tes
 
 ## Status
 
-Not deployed, and nothing published. Depends on `@munaxa/licensing@0.1.0`, which is not yet
-published; until it is, `pnpm install --frozen-lockfile` fails here and in CI.
+Not deployed, and no image published. Depends on `@munaxa/licensing@0.2.0`, which is published to
+GitHub Packages and locked in `pnpm-lock.yaml`.

@@ -13,6 +13,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// Rendered per request, every page: each response carries its own CSP nonce (middleware.ts),
+// which a page prerendered at build time could not.
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({ children }: { children: ReactNode }): ReactNode {
   return (
     <html lang="en" dir="ltr">

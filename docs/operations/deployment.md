@@ -131,3 +131,19 @@ nothing beyond its core modules.
 4. API rolled, readiness green; then the portal.
 5. Smoke: sign in, open the dashboard, `GET /api/v1/licensing/public-keys`, and one product's
    entitlement request with its credential.
+
+## On AWS (shared stack, not yet applied)
+
+The shared AWS stack in `munaxa-platform/infra/aws` (draft) hosts Control in `eu-central-1`:
+
+| Here                     | There                                                                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Images                   | `.github/workflows/publish-images.yml` pushes `api`, `migrate` and `portal` to ECR on an `image/<sha>` tag             |
+| `control-api.munaxa.com` | ALB host rule to the API; `/api/v1/admin/*` answers 403 there                                                          |
+| Operator front door      | `operator.munaxa.com`, only from the operator ranges: `/api/auth/*` to Identity, the rest to the portal                |
+| `CONTROL_API_URL`        | `http://control-api.<env>.munaxa.internal:3100` (Cloud Map), reachable from the portal only                            |
+| Signing key              | `LICENCE_SIGNING_BACKEND=KMS` with a P-256 KMS key (ADR-0008, proposed)                                                |
+| Database                 | `control` on the shared PostgreSQL 16 instance; `control_owner` in the migrate bundle, `control_app` in the API bundle |
+| Release job              | The `control-migrate` task, run before each new API version                                                            |
+| Sweep                    | An hourly EventBridge Scheduler task in production                                                                     |
+| `TRUST_PROXY_HOPS`       | `1` (the ALB)                                                                                                          |

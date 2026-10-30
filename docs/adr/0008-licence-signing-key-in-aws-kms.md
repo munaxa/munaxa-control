@@ -21,9 +21,11 @@ interface".
 1. On AWS, the signing key is an **AWS KMS asymmetric key**, `ECC_NIST_P256`, usage
    `SIGN_VERIFY`, in the Control workload account and region. Its private half never leaves KMS.
 2. The API selects it with `LICENCE_SIGNING_BACKEND=KMS`, `LICENCE_SIGNING_KMS_KEY_ID` (the key
-   ARN) and `LICENCE_SIGNING_PUBLIC_KEY` (its SPKI PEM, which is public). `FILE` stays the default
-   and is unchanged for on-premises or non-AWS hosting. With `KMS`, a key file is refused, ES256
-   is the only algorithm, and the public key must be P-256.
+   ARN) and `LICENCE_SIGNING_PUBLIC_KEY` (its SPKI PEM, which is public). `FILE` is unchanged for
+   on-premises or non-AWS hosting and stays the default outside production; production refuses to
+   start unless `LICENCE_SIGNING_BACKEND` is set, so a deployment meant for KMS never falls back
+   to a file. With `KMS`, a key file is refused, ES256 is the only algorithm, and the public key
+   must be P-256.
 3. Signing goes through the shared `@munaxa/licensing` contract, unmodified. Its signer interface
    is synchronous, so `KmsLicenceSigner` runs each build twice: the first pass captures the exact
    bytes the contract asks to sign; KMS signs their SHA-256 (`MessageType=DIGEST`,
@@ -33,9 +35,12 @@ interface".
 4. **Startup proves the key.** The API signs a probe through KMS and verifies it with
    `LICENCE_SIGNING_PUBLIC_KEY` before it serves; a missing permission, a wrong key or a mismatched
    public key stops the process (fail closed).
-5. The key policy grants the account root administration and the API task role `kms:Sign` on this
-   key only. No other principal may use it, and only root may disable it or schedule its deletion.
-   Every signature is a CloudTrail `Sign` event.
+5. The key policy is the account default: it names only the account, so IAM policies in the
+   account decide who may use the key. The API task role's own policy grants `kms:Sign` on this key
+   and nothing else. Principals with broad IAM permissions in the account (root, the Terraform
+   deployer role) can also use or administer it; a key policy naming the task role and denying
+   `kms:Sign` to everyone else is a follow-up once that role exists. Every signature is a
+   CloudTrail `Sign` event.
 
 ## Consequences
 

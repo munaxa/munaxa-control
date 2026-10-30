@@ -61,6 +61,7 @@ const schema = z.object({
   /**
    * Where the licence signing key lives. `FILE`: a mounted private key in this process (ADR-0003).
    * `KMS`: an AWS KMS key the process can ask to sign but never read (ADR-0008, proposed).
+   * Required in production; `FILE` elsewhere when unset.
    */
   LICENCE_SIGNING_BACKEND: z.enum(['FILE', 'KMS']).default('FILE'),
   /** `FILE`: the licence signing key, as a file. Never an environment literal, never in an image. */
@@ -209,6 +210,12 @@ export function loadEnvironment(
     issues.push(
       'OPERATOR_SUBJECT_ALLOWLIST: required in production until OPERATOR_REQUIRE_MFA is on (ADR-0006).',
     );
+  }
+
+  // Production names its signing backend, so a deployment meant for KMS can never start on the
+  // FILE default (ADR-0008).
+  if (raw.NODE_ENV === 'production' && source['LICENCE_SIGNING_BACKEND'] === undefined) {
+    issues.push('LICENCE_SIGNING_BACKEND: required in production (FILE or KMS).');
   }
 
   let licencePrivateKey: string | null = null;

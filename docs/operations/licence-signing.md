@@ -76,8 +76,9 @@ With `LICENCE_SIGNING_BACKEND=KMS` there is no private key file to generate, bac
 
 1. **Create** (root, after the owner approves; Terraform in the shared infrastructure root): an
    asymmetric KMS key, `ECC_NIST_P256`, usage `SIGN_VERIFY`, alias `alias/munaxa-control-licence-<kid>`,
-   deletion window 30 days. The key policy gives the account root administration and the Control API
-   task role `kms:Sign` only.
+   deletion window 30 days. The key policy names only the account; the Control API task role's own
+   policy grants `kms:Sign` on this key and nothing else. Set `LICENCE_SIGNING_BACKEND=KMS`
+   explicitly: production refuses to start without a named backend.
 2. **Publish the public half:** `aws kms get-public-key` returns DER; convert it to SPKI PEM and
    set it as `LICENCE_SIGNING_PUBLIC_KEY` (it is public, so a plain task environment value is fine),
    with `LICENCE_SIGNING_KMS_KEY_ID` set to the key ARN and `LICENCE_SIGNING_KID` to the new kid.

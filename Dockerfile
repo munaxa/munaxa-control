@@ -13,7 +13,8 @@
 #   docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
 #     --target api -t munaxa-control-api:<commit> .
 #
-# Nothing here holds the licence signing key: it is mounted at run time (docs/operations/).
+# Nothing here holds the licence signing key: with KMS (ADR-0008) it never leaves AWS KMS, and with
+# FILE it is mounted at run time (docs/operations/).
 
 ARG NODE_IMAGE=node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 

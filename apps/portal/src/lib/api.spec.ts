@@ -23,7 +23,7 @@ beforeEach(() => {
   fetchMock.mockResolvedValue(new Response('{}', { status: 200 }));
   vi.mocked(accessToken).mockResolvedValue('identity-token');
   vi.mocked(headers).mockResolvedValue(
-    new Headers({ 'cf-access-jwt-assertion': 'access-token' }) as never,
+    new Headers({ 'cf-access-jwt-assertion': 'access-token' }),
   );
 });
 
@@ -56,7 +56,7 @@ describe('the control API client', () => {
   });
 
   it('sends no Access header when the request carried none (Access off outside production)', async () => {
-    vi.mocked(headers).mockResolvedValue(new Headers() as never);
+    vi.mocked(headers).mockResolvedValue(new Headers());
     await apiDownload('/admin/products/docs/revocation-list');
     expect(sentHeaders()).toEqual({ authorization: 'Bearer identity-token' });
   });

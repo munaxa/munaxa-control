@@ -22,6 +22,7 @@ import {
   LicensingAdminController,
   LicensingPublicController,
 } from './licensing/licensing.controller';
+import { LICENCE_SIGNER, licenceSignerFor, type LicenceSigner } from './licensing/licence-signer';
 import { LicensingService } from './licensing/licensing.service';
 import { loggingOptions } from './observability/logging';
 import { ReportsController } from './reports/reports.controller';
@@ -32,7 +33,8 @@ import { UsageService } from './usage/usage.service';
 
 /**
  * The composition root. The environment and the clock are given, not read, so a test builds the
- * same application against its own database, keys and time.
+ * same application against its own database, keys and time. The licence signer is built from the
+ * environment unless one is given (a test standing in for AWS KMS).
  *
  * Two global guards, in order: the rate limiter (`core/rate-limit.ts`, ADR-0007), then the one
  * authentication guard, closed by default (`auth/authentication.guard.ts`); one global filter that
@@ -41,7 +43,7 @@ import { UsageService } from './usage/usage.service';
  */
 @Module({})
 export class AppModule implements NestModule {
-  static with(environment: Environment, clock: Clock = systemClock) {
+  static with(environment: Environment, clock: Clock = systemClock, licenceSigner?: LicenceSigner) {
     return {
       module: AppModule,
       imports: [LoggerModule.forRoot(loggingOptions(environment))],
@@ -58,6 +60,9 @@ export class AppModule implements NestModule {
       providers: [
         { provide: ENVIRONMENT, useValue: environment },
         { provide: CLOCK, useValue: clock },
+        licenceSigner === undefined
+          ? { provide: LICENCE_SIGNER, useFactory: () => licenceSignerFor(environment) }
+          : { provide: LICENCE_SIGNER, useValue: licenceSigner },
         PrismaService,
         AuditService,
         CustomersService,

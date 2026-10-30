@@ -18,7 +18,7 @@ const reads = () => PRIVATE;
 
 describe('loadEnvironment', () => {
   it('accepts production with an operator allow-list, or with MFA required', () => {
-    const production = { ...base, NODE_ENV: 'production' };
+    const production = { ...base, NODE_ENV: 'production', LICENCE_SIGNING_BACKEND: 'FILE' };
     expect(
       loadEnvironment({ ...production, OPERATOR_SUBJECT_ALLOWLIST: ' a , b ' }, reads)
         .operatorSubjects,
@@ -61,11 +61,19 @@ describe('loadEnvironment', () => {
         ]),
       },
     ],
-    ['production without MFA and without an operator allow-list', { NODE_ENV: 'production' }],
+    [
+      'production without MFA and without an operator allow-list',
+      { NODE_ENV: 'production', LICENCE_SIGNING_BACKEND: 'FILE' },
+    ],
+    [
+      'production without an explicit signing backend',
+      { NODE_ENV: 'production', OPERATOR_SUBJECT_ALLOWLIST: 'operator-1' },
+    ],
     [
       'a plain-http issuer in production',
       {
         NODE_ENV: 'production',
+        LICENCE_SIGNING_BACKEND: 'FILE',
         OPERATOR_AUTH_ISSUER: 'http://munaxa.example/api/auth',
         OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
       },

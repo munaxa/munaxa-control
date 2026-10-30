@@ -1,7 +1,4 @@
-import { createPublicKey } from 'node:crypto';
-
-import { Inject, Injectable } from '@nestjs/common';
-import { AsymmetricSigner } from '@munaxa/crypto';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import {
   DeploymentType,
   SubscriptionStatus,
@@ -25,6 +22,8 @@ import { newId } from '../core/ids';
 import { PrismaService, type Transaction } from '../core/prisma.service';
 import { snapshotOf } from '../entitlements/snapshot';
 import { termOf } from '../subscriptions/subscriptions.service';
+
+import { LICENCE_SIGNER, type LicenceSigner } from './licence-signer';
 
 const DAY = 86_400_000;
 const EPOCH = '1970-01-01T00:00:00.000Z';
@@ -50,17 +49,17 @@ export interface PublishedKey {
 /**
  * Licence issuance, renewal and controlled reactivation for on-premises installations.
  *
- * The private key is read once, from a mounted file, into this process and nowhere else. It never
- * appears in a response, a log, the portal or a database row; installations are given the public
- * half through `GET /api/v1/licensing/public-keys`.
+ * The private key is either read once, from a mounted file, into this process and nowhere else, or
+ * held by AWS KMS and never read at all (`licence-signer.ts`, ADR-0008). It never appears in a
+ * response, a log, the portal or a database row; installations are given the public half through
+ * `GET /api/v1/licensing/public-keys`.
  *
  * A licence covers at most `LICENCE_MAX_TERM_DAYS` and never beyond the subscription's own term,
  * because an offline installation cannot learn of a revocation: the term is the only lever there
  * is (platform ADR-0022). Renewal is issuing the next one.
  */
 @Injectable()
-export class LicensingService {
-  private readonly signer: AsymmetricSigner;
+export class LicensingService implements OnModuleInit {
   private readonly keys: readonly PublishedKey[];
 
   constructor(
@@ -68,22 +67,13 @@ export class LicensingService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ENVIRONMENT) private readonly environment: Environment,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(LICENCE_SIGNER) private readonly signer: LicenceSigner,
   ) {
-    const publicKey = createPublicKey(environment.licencePrivateKey)
-      .export({ type: 'spki', format: 'pem' })
-      .toString();
-    this.signer = new AsymmetricSigner(environment.LICENCE_SIGNING_ALGORITHM, [
-      {
-        kid: environment.LICENCE_SIGNING_KID,
-        privateKey: environment.licencePrivateKey,
-        publicKey,
-      },
-    ]);
     this.keys = [
       {
-        kid: environment.LICENCE_SIGNING_KID,
-        algorithm: environment.LICENCE_SIGNING_ALGORITHM,
-        publicKey,
+        kid: signer.kid,
+        algorithm: signer.algorithm,
+        publicKey: signer.publicKey,
         current: true,
       },
       ...environment.licencePreviousPublicKeys.map((k) => ({
@@ -93,6 +83,11 @@ export class LicensingService {
         current: false,
       })),
     ];
+  }
+
+  /** A key that cannot sign, or whose published half does not verify it, stops startup. */
+  async onModuleInit(): Promise<void> {
+    await this.signer.selfTest();
   }
 
   publicKeys(): readonly PublishedKey[] {
@@ -292,9 +287,11 @@ export class LicensingService {
     }));
     const latest = entries.reduce((max, e) => (e.revokedAt > max ? e.revokedAt : max), EPOCH);
     const sequence = entries.length + 1;
-    const body = issueRevocationList(
-      { format: REVOCATION_LIST_FORMAT, product, sequence, issuedAt: latest, revoked: entries },
-      this.signer,
+    const body = await this.signer.sign((signer) =>
+      issueRevocationList(
+        { format: REVOCATION_LIST_FORMAT, product, sequence, issuedAt: latest, revoked: entries },
+        signer,
+      ),
     );
     await this.prisma.$transaction((tx) =>
       this.audit.record(
@@ -456,7 +453,7 @@ export class LicensingService {
       notBefore: now.toISOString(),
       supersedes: supersedes?.id ?? null,
     };
-    const token = issueLicense(payload, this.signer);
+    const token = await this.signer.sign((signer) => issueLicense(payload, signer));
     await tx.licence.create({
       data: {
         id: licenseId,

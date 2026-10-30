@@ -69,3 +69,25 @@ its licence keeps verifying until its term ends — which is why terms stay shor
    the new revocation list — signed with the new key — with the reissued licences.
 4. Record the incident; every licence signed with the old key is suspect until replaced, and an
    offline installation learns nothing until the delivery reaches it. This is why terms are short.
+
+## On AWS: a KMS key instead of a file (ADR-0008, proposed)
+
+With `LICENCE_SIGNING_BACKEND=KMS` there is no private key file to generate, back up or destroy.
+
+1. **Create** (root, after the owner approves; Terraform in the shared infrastructure root): an
+   asymmetric KMS key, `ECC_NIST_P256`, usage `SIGN_VERIFY`, alias `alias/munaxa-control-licence-<kid>`,
+   deletion window 30 days. The key policy names only the account; the Control API task role's own
+   policy grants `kms:Sign` on this key and nothing else. Set `LICENCE_SIGNING_BACKEND=KMS`
+   explicitly: production refuses to start without a named backend.
+2. **Publish the public half:** `aws kms get-public-key` returns DER; convert it to SPKI PEM and
+   set it as `LICENCE_SIGNING_PUBLIC_KEY` (it is public, so a plain task environment value is fine),
+   with `LICENCE_SIGNING_KMS_KEY_ID` set to the key ARN and `LICENCE_SIGNING_KID` to the new kid.
+3. **Startup check:** the API signs a probe through KMS and verifies it with that public key, and
+   refuses to start if either fails. A wrong ARN, a missing permission or a pasted wrong key stops
+   the deployment rather than issuing unverifiable licences.
+4. **Rotate:** the same steps as above, with a new KMS key in place of a new file. Disable the old
+   key (do not schedule deletion) once no licence signed with it is valid; schedule deletion only
+   after the old public key has been removed everywhere.
+5. **Compromise:** a KMS key cannot be copied, so "compromise" means misuse through a principal that
+   could call `kms:Sign`. Remove that permission, disable the key, then follow **Compromise** above
+   with a new key. CloudTrail `Sign` events show every signature made with it.

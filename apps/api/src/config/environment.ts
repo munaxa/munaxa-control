@@ -1,3 +1,4 @@
+import { createPublicKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { z } from 'zod';
@@ -57,8 +58,21 @@ const schema = z.object({
    */
   OPERATOR_SUBJECT_ALLOWLIST: z.string().default(''),
 
-  /** The licence signing key, as a file. Never an environment literal, never in an image. */
-  LICENCE_SIGNING_PRIVATE_KEY_FILE: z.string().min(1),
+  /**
+   * Where the licence signing key lives. `FILE`: a mounted private key in this process (ADR-0003).
+   * `KMS`: an AWS KMS key the process can ask to sign but never read (ADR-0008, proposed).
+   * Required in production; `FILE` elsewhere when unset.
+   */
+  LICENCE_SIGNING_BACKEND: z.enum(['FILE', 'KMS']).default('FILE'),
+  /** `FILE`: the licence signing key, as a file. Never an environment literal, never in an image. */
+  LICENCE_SIGNING_PRIVATE_KEY_FILE: z.string().min(1).optional(),
+  /** `KMS`: the key's ARN (`arn:aws:kms:<region>:<account>:key/<id>`); an ECC_NIST_P256 SIGN_VERIFY key. */
+  LICENCE_SIGNING_KMS_KEY_ID: z
+    .string()
+    .regex(/^arn:aws:kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/, 'must be a KMS key ARN')
+    .optional(),
+  /** `KMS`: the key's public half, SPKI PEM. Checked against a KMS signature at startup. */
+  LICENCE_SIGNING_PUBLIC_KEY: z.string().min(1).optional(),
   LICENCE_SIGNING_KID: z.string().min(1).max(64),
   LICENCE_SIGNING_ALGORITHM: z.enum(['ES256', 'RS256']).default('ES256'),
   /**
@@ -100,7 +114,8 @@ export interface Environment extends RawEnvironment {
   readonly operatorPublicKeys: readonly PublicKey[];
   /** `OPERATOR_SUBJECT_ALLOWLIST`, parsed. Empty means no allow-list is configured. */
   readonly operatorSubjects: ReadonlySet<string>;
-  readonly licencePrivateKey: string;
+  /** The `FILE` backend's private key; null with `KMS`, whose key never enters this process. */
+  readonly licencePrivateKey: string | null;
   readonly licencePreviousPublicKeys: readonly PublicKey[];
 }
 
@@ -197,14 +212,59 @@ export function loadEnvironment(
     );
   }
 
-  let licencePrivateKey = '';
-  try {
-    licencePrivateKey = readFile(raw.LICENCE_SIGNING_PRIVATE_KEY_FILE);
-    if (!/-----BEGIN (EC |RSA )?PRIVATE KEY-----/.test(licencePrivateKey)) {
-      issues.push('LICENCE_SIGNING_PRIVATE_KEY_FILE: is not a PEM private key.');
+  // Production names its signing backend, so a deployment meant for KMS can never start on the
+  // FILE default (ADR-0008).
+  if (raw.NODE_ENV === 'production' && source['LICENCE_SIGNING_BACKEND'] === undefined) {
+    issues.push('LICENCE_SIGNING_BACKEND: required in production (FILE or KMS).');
+  }
+
+  let licencePrivateKey: string | null = null;
+  if (raw.LICENCE_SIGNING_BACKEND === 'FILE') {
+    if (raw.LICENCE_SIGNING_PRIVATE_KEY_FILE === undefined) {
+      issues.push('LICENCE_SIGNING_PRIVATE_KEY_FILE: required when LICENCE_SIGNING_BACKEND=FILE.');
+    } else {
+      try {
+        licencePrivateKey = readFile(raw.LICENCE_SIGNING_PRIVATE_KEY_FILE);
+        if (!/-----BEGIN (EC |RSA )?PRIVATE KEY-----/.test(licencePrivateKey)) {
+          issues.push('LICENCE_SIGNING_PRIVATE_KEY_FILE: is not a PEM private key.');
+        }
+      } catch {
+        issues.push('LICENCE_SIGNING_PRIVATE_KEY_FILE: cannot be read.');
+      }
     }
-  } catch {
-    issues.push('LICENCE_SIGNING_PRIVATE_KEY_FILE: cannot be read.');
+  } else {
+    // KMS: the private half never reaches this process, so there must be no file to fall back to.
+    if (raw.LICENCE_SIGNING_PRIVATE_KEY_FILE !== undefined) {
+      issues.push(
+        'LICENCE_SIGNING_PRIVATE_KEY_FILE: must not be set when LICENCE_SIGNING_BACKEND=KMS.',
+      );
+    }
+    if (raw.LICENCE_SIGNING_KMS_KEY_ID === undefined) {
+      issues.push('LICENCE_SIGNING_KMS_KEY_ID: required when LICENCE_SIGNING_BACKEND=KMS.');
+    }
+    if (raw.LICENCE_SIGNING_ALGORITHM !== 'ES256') {
+      issues.push('LICENCE_SIGNING_ALGORITHM: KMS signing supports ES256 only.');
+    }
+    const publicKey = raw.LICENCE_SIGNING_PUBLIC_KEY;
+    if (publicKey === undefined) {
+      issues.push('LICENCE_SIGNING_PUBLIC_KEY: required when LICENCE_SIGNING_BACKEND=KMS.');
+    } else if (/PRIVATE KEY/.test(publicKey)) {
+      issues.push(
+        'LICENCE_SIGNING_PUBLIC_KEY: holds a private key. Only the public half belongs here.',
+      );
+    } else {
+      try {
+        const key = createPublicKey(publicKey);
+        if (
+          key.asymmetricKeyType !== 'ec' ||
+          key.asymmetricKeyDetails?.namedCurve !== 'prime256v1'
+        ) {
+          issues.push('LICENCE_SIGNING_PUBLIC_KEY: must be a P-256 public key.');
+        }
+      } catch {
+        issues.push('LICENCE_SIGNING_PUBLIC_KEY: is not a PEM public key.');
+      }
+    }
   }
 
   if (issues.length > 0) throw new ConfigurationError(issues);

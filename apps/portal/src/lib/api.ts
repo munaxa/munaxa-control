@@ -29,19 +29,29 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The operator's Identity token and the Cloudflare Access token this request arrived with. Every
+ * operator route on the API needs both, so every call sends both, downloads included.
+ */
+async function credentials(returnTo: string): Promise<Record<string, string>> {
+  const token = await accessToken();
+  if (token === undefined) redirect(signInPath(returnTo));
+  const access = (await headers()).get(ACCESS_HEADER);
+  return {
+    authorization: `Bearer ${token}`,
+    ...(access !== null && { [ACCESS_HEADER]: access }),
+  };
+}
+
 async function call<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH',
   path: string,
   options: { body?: unknown; idempotencyKey?: string; returnTo?: string } = {},
 ): Promise<T> {
-  const token = await accessToken();
-  if (token === undefined) redirect(signInPath(options.returnTo ?? '/'));
-  const access = (await headers()).get(ACCESS_HEADER);
   const response = await fetch(`${baseUrl()}/api/v1${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${token}`,
-      ...(access !== null && { [ACCESS_HEADER]: access }),
+      ...(await credentials(options.returnTo ?? '/')),
       accept: 'application/json',
       ...(options.body !== undefined && { 'content-type': 'application/json' }),
       ...(options.idempotencyKey !== undefined && { 'idempotency-key': options.idempotencyKey }),
@@ -85,10 +95,8 @@ export const apiSend = <T>(
 
 /** The raw response, for a download the portal streams back to the browser. */
 export async function apiDownload(path: string): Promise<Response> {
-  const token = await accessToken();
-  if (token === undefined) redirect(signInPath('/'));
   return fetch(`${baseUrl()}/api/v1${path}`, {
-    headers: { authorization: `Bearer ${token}` },
+    headers: await credentials('/'),
     cache: 'no-store',
     signal: AbortSignal.timeout(10_000),
   });

@@ -13,7 +13,8 @@
 #   docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
 #     --target api -t munaxa-control-api:<commit> .
 #
-# Nothing here holds the licence signing key: it is mounted at run time (docs/operations/).
+# Nothing here holds the licence signing key: with KMS (ADR-0008) it never leaves AWS KMS, and with
+# FILE it is mounted at run time (docs/operations/).
 
 ARG NODE_IMAGE=node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 
@@ -28,11 +29,14 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 FROM os AS base
+# COREPACK_HOME outside /root: the migrate target runs pnpm as `node`, which cannot read root's
+# home and would otherwise download pnpm again at run time, or fail with no network.
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1 \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    COREPACK_HOME=/corepack
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate && chmod -R a+rX /corepack
 WORKDIR /build
 
 # --- Dependencies: the lockfile decides, the token is a secret mount -----------------------------

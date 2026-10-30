@@ -1,6 +1,6 @@
 # ADR-0008 — Licence signing on AWS: the key stays in KMS
 
-**Status** Proposed · **Date** 2026-10-29 · **Approval** Pending the owner's decision
+**Status** Accepted · **Date** 2026-10-29 · **Approval** The owner, 2026-10-30 (KMS asymmetric signing for Control on AWS)
 **Amends** ADR-0003 §1 (where the private half lives), only when `LICENCE_SIGNING_BACKEND=KMS`
 **Relates to** the shared AWS hosting ADR (draft), munaxa-platform ADR-0022 (`mxl1`, ES256/RS256 only)
 
@@ -16,7 +16,7 @@ thing ADR-0003 forbids) and rests on disk for the life of the task.
 ADR-0003 already names a KMS-held key as "the right end state, and compatible: the signer is one
 interface".
 
-## Decision (proposed)
+## Decision
 
 1. On AWS, the signing key is an **AWS KMS asymmetric key**, `ECC_NIST_P256`, usage
    `SIGN_VERIFY`, in the Control workload account and region. Its private half never leaves KMS.

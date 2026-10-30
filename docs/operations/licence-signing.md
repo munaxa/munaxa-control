@@ -70,7 +70,7 @@ its licence keeps verifying until its term ends — which is why terms stay shor
 4. Record the incident; every licence signed with the old key is suspect until replaced, and an
    offline installation learns nothing until the delivery reaches it. This is why terms are short.
 
-## On AWS: a KMS key instead of a file (ADR-0008, proposed)
+## On AWS: a KMS key instead of a file (ADR-0008)
 
 With `LICENCE_SIGNING_BACKEND=KMS` there is no private key file to generate, back up or destroy.
 

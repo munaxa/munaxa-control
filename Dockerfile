@@ -28,11 +28,14 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 FROM os AS base
+# COREPACK_HOME outside /root: the migrate target runs pnpm as `node`, which cannot read root's
+# home and would otherwise download pnpm again at run time, or fail with no network.
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1 \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    COREPACK_HOME=/corepack
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate && chmod -R a+rX /corepack
 WORKDIR /build
 
 # --- Dependencies: the lockfile decides, the token is a secret mount -----------------------------

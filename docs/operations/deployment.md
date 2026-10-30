@@ -62,7 +62,7 @@ done
 | --------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `api`     | `node dist/main.js` as `node`           | Production dependencies only. Works on a read-only root filesystem with a `/tmp` tmpfs. Mount the signing key read-only at `LICENCE_SIGNING_PRIVATE_KEY_FILE`, owned by uid 1000, mode 0400. Has a `HEALTHCHECK` on `/health/live` |
 | `migrate` | `node scripts/migrate.mjs` as `node`    | The release job: migrations and runtime grants as the owner role (`DATABASE_MIGRATION_URL`). Run once, before the new API                                                                                                          |
-| `portal`  | the Next.js standalone server as `node` | `CONTROL_API_URL`, `PORT` (3200). No secret                                                                                                                                                                                        |
+| `portal`  | the Next.js standalone server as `node` | `CONTROL_API_URL`, `PORT` (3200), `OPERATOR_ACCESS_TEAM_DOMAIN`, `OPERATOR_ACCESS_AUDIENCE`. No secret                                                                                                                             |
 
 ## The API
 
@@ -120,7 +120,7 @@ The operator console sits behind a Cloudflare Access self-hosted application (te
 verify it: RS256 against the keys at `<team domain>/cdn-cgi/access/certs`, the team domain as
 `iss`, the application's AUD tag in `aud`, `exp`, `nbf` and `iat` within the clock skew, `type`
 `app`, and an `email` and `sub` (a service token is not an operator). The portal forwards the
-header with each API call.
+header with each API call, licence and revocation-list downloads included.
 
 - It fails closed: no token, a bad one, or keys that cannot be read give 401 or 503, never a page.
   In production the processes refuse to run open: the API stops at startup and the portal answers

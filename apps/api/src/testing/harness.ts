@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign } from 'node:crypto';
 
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -20,6 +20,13 @@ import { configureApplication } from '../setup';
  * production runs under; `TEST_DATABASE_MIGRATION_URL` is the owner, used only to reset tables.
  */
 export const ISSUER = 'https://identity.test/api/auth';
+/** Cloudflare Access, when a suite turns it on with `accessEnvironment`. */
+export const ACCESS_TEAM_DOMAIN = 'https://munaxa-test.cloudflareaccess.com';
+export const ACCESS_AUDIENCE = 'a'.repeat(64);
+export const accessEnvironment = {
+  OPERATOR_ACCESS_TEAM_DOMAIN: ACCESS_TEAM_DOMAIN,
+  OPERATOR_ACCESS_AUDIENCE: ACCESS_AUDIENCE,
+};
 export const ORGANISATION = 'munaxa-group';
 export const ALL_PERMISSIONS = Object.values(ControlPermission);
 
@@ -57,6 +64,8 @@ export interface Harness {
   ): string;
   /** A token signed by a key Identity does not hold. */
   forgedToken(): string;
+  /** A Cloudflare Access token for this application; `claims` replace the defaults. */
+  accessToken(claims?: Record<string, unknown>, options?: { forged?: boolean }): string;
   reset(): Promise<void>;
   close(): Promise<void>;
 }
@@ -102,8 +111,46 @@ export async function startHarness(
   const tokens = issuer(identity);
   const forged = issuer(impostor);
 
+  // Cloudflare's side: an RSA key published as a JWKS, and one Cloudflare does not publish.
+  const accessKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const strangerKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwks = {
+    keys: [
+      {
+        ...accessKey.publicKey.export({ format: 'jwk' }),
+        kid: 'access-1',
+        alg: 'RS256',
+        use: 'sig',
+      },
+    ],
+  };
+  const accessKeys = (url: string) =>
+    url === `${ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`
+      ? Promise.resolve(jwks)
+      : Promise.reject(new Error(`unexpected ${url}`));
+  const accessToken = (
+    claims: Record<string, unknown> = {},
+    options: { forged?: boolean } = {},
+  ) => {
+    const now = Math.floor(clock.now().getTime() / 1_000);
+    const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const body = `${part({ alg: 'RS256', kid: 'access-1', typ: 'JWT' })}.${part({
+      iss: ACCESS_TEAM_DOMAIN,
+      aud: [ACCESS_AUDIENCE],
+      email: 'operator@munaxa.test',
+      sub: 'access-user-1',
+      type: 'app',
+      iat: now,
+      nbf: now,
+      exp: now + 3_600,
+      ...claims,
+    })}`;
+    const key = options.forged === true ? strangerKey.privateKey : accessKey.privateKey;
+    return `${body}.${sign('RSA-SHA256', Buffer.from(body), key).toString('base64url')}`;
+  };
+
   const module = await Test.createTestingModule({
-    imports: [AppModule.with(environment, clock)],
+    imports: [AppModule.with(environment, clock, undefined, accessKeys)],
   }).compile();
   const app = module.createNestApplication({ logger: false });
   configureApplication(app, environment);
@@ -132,6 +179,7 @@ export async function startHarness(
     owner,
     token: (permissions = ALL_PERMISSIONS, overrides) => mint(tokens, permissions, overrides),
     forgedToken: () => mint(forged, ALL_PERMISSIONS),
+    accessToken,
     reset: async () => {
       await owner.$executeRawUnsafe(
         'TRUNCATE audit_event, usage_report, licence, installation, subscription_event, subscription, plan_version, plan, tenant_link, service_credential, product_deployment, customer, idempotency_record RESTART IDENTITY CASCADE',

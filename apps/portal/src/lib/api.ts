@@ -1,11 +1,14 @@
 import 'server-only';
 
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+import { ACCESS_HEADER } from './access';
 import { accessToken, signInPath } from './session';
 
 /**
- * The control API, called server-to-server with the operator's own token. The API URL is internal
+ * The control API, called server-to-server with the operator's own token and the Cloudflare Access
+ * token this request arrived with, which the API checks again. The API URL is internal
  * configuration (`CONTROL_API_URL`) and is never sent to the browser.
  */
 function baseUrl(): string {
@@ -33,10 +36,12 @@ async function call<T>(
 ): Promise<T> {
   const token = await accessToken();
   if (token === undefined) redirect(signInPath(options.returnTo ?? '/'));
+  const access = (await headers()).get(ACCESS_HEADER);
   const response = await fetch(`${baseUrl()}/api/v1${path}`, {
     method,
     headers: {
       authorization: `Bearer ${token}`,
+      ...(access !== null && { [ACCESS_HEADER]: access }),
       accept: 'application/json',
       ...(options.body !== undefined && { 'content-type': 'application/json' }),
       ...(options.idempotencyKey !== undefined && { 'idempotency-key': options.idempotencyKey }),

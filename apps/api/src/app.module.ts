@@ -4,6 +4,11 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { AuditService } from './audit/audit.service';
 import { AuthenticationGuard } from './auth/authentication.guard';
+import {
+  ACCESS_VERIFIER,
+  CloudflareAccessVerifier,
+  type FetchAccessKeys,
+} from './auth/cloudflare-access';
 import { CatalogueController } from './catalogue/catalogue.controller';
 import { CatalogueService } from './catalogue/catalogue.service';
 import { ENVIRONMENT, type Environment } from './config/environment';
@@ -34,7 +39,8 @@ import { UsageService } from './usage/usage.service';
 /**
  * The composition root. The environment and the clock are given, not read, so a test builds the
  * same application against its own database, keys and time. The licence signer is built from the
- * environment unless one is given (a test standing in for AWS KMS).
+ * environment unless one is given (a test standing in for AWS KMS), and Cloudflare Access's keys are
+ * read from its team domain unless a reader is given (a test standing in for Cloudflare).
  *
  * Two global guards, in order: the rate limiter (`core/rate-limit.ts`, ADR-0007), then the one
  * authentication guard, closed by default (`auth/authentication.guard.ts`); one global filter that
@@ -43,7 +49,13 @@ import { UsageService } from './usage/usage.service';
  */
 @Module({})
 export class AppModule implements NestModule {
-  static with(environment: Environment, clock: Clock = systemClock, licenceSigner?: LicenceSigner) {
+  static with(
+    environment: Environment,
+    clock: Clock = systemClock,
+    licenceSigner?: LicenceSigner,
+    accessKeys?: FetchAccessKeys,
+  ) {
+    const access = environment.operatorAccess;
     return {
       module: AppModule,
       imports: [LoggerModule.forRoot(loggingOptions(environment))],
@@ -63,6 +75,18 @@ export class AppModule implements NestModule {
         licenceSigner === undefined
           ? { provide: LICENCE_SIGNER, useFactory: () => licenceSignerFor(environment) }
           : { provide: LICENCE_SIGNER, useValue: licenceSigner },
+        {
+          provide: ACCESS_VERIFIER,
+          useValue:
+            access === null
+              ? null
+              : new CloudflareAccessVerifier({
+                  ...access,
+                  clockSkewMs: environment.OPERATOR_AUTH_CLOCK_SKEW_MS,
+                  now: () => clock.now().getTime(),
+                  ...(accessKeys !== undefined && { fetchKeys: accessKeys }),
+                }),
+        },
         PrismaService,
         AuditService,
         CustomersService,

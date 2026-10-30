@@ -22,9 +22,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(new Response('{}', { status: 200 }));
   vi.mocked(accessToken).mockResolvedValue('identity-token');
-  vi.mocked(headers).mockResolvedValue(
-    new Headers({ 'cf-access-jwt-assertion': 'access-token' }),
-  );
+  vi.mocked(headers).mockResolvedValue(new Headers({ 'cf-access-jwt-assertion': 'access-token' }));
 });
 
 afterEach(() => {

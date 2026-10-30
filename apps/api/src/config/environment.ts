@@ -57,6 +57,14 @@ const schema = z.object({
    * `OPERATOR_REQUIRE_MFA` is off; optional (and still enforced when set) once it is on.
    */
   OPERATOR_SUBJECT_ALLOWLIST: z.string().default(''),
+  /**
+   * Cloudflare Access in front of the operator console: the team domain
+   * (`https://<team>.cloudflareaccess.com`) and the Access application's AUD tag. With both set,
+   * every operator route also requires the Access token the portal forwards
+   * (`auth/cloudflare-access.ts`). Required in production; both or neither elsewhere.
+   */
+  OPERATOR_ACCESS_TEAM_DOMAIN: z.string().optional(),
+  OPERATOR_ACCESS_AUDIENCE: z.string().optional(),
 
   /**
    * Where the licence signing key lives. `FILE`: a mounted private key in this process (ADR-0003).
@@ -114,6 +122,8 @@ export interface Environment extends RawEnvironment {
   readonly operatorPublicKeys: readonly PublicKey[];
   /** `OPERATOR_SUBJECT_ALLOWLIST`, parsed. Empty means no allow-list is configured. */
   readonly operatorSubjects: ReadonlySet<string>;
+  /** Cloudflare Access, when configured; null only outside production. */
+  readonly operatorAccess: { readonly teamDomain: string; readonly audience: string } | null;
   /** The `FILE` backend's private key; null with `KMS`, whose key never enters this process. */
   readonly licencePrivateKey: string | null;
   readonly licencePreviousPublicKeys: readonly PublicKey[];
@@ -212,6 +222,29 @@ export function loadEnvironment(
     );
   }
 
+  const teamDomain = raw.OPERATOR_ACCESS_TEAM_DOMAIN?.trim() || undefined;
+  const accessAudience = raw.OPERATOR_ACCESS_AUDIENCE?.trim() || undefined;
+  let operatorAccess: Environment['operatorAccess'] = null;
+  if (teamDomain === undefined && accessAudience === undefined) {
+    if (raw.NODE_ENV === 'production') {
+      issues.push(
+        'OPERATOR_ACCESS_TEAM_DOMAIN, OPERATOR_ACCESS_AUDIENCE: required in production (Cloudflare Access).',
+      );
+    }
+  } else if (teamDomain === undefined || accessAudience === undefined) {
+    issues.push('OPERATOR_ACCESS_TEAM_DOMAIN, OPERATOR_ACCESS_AUDIENCE: set both or neither.');
+  } else {
+    if (!/^https:\/\/[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$/.test(teamDomain)) {
+      issues.push(
+        'OPERATOR_ACCESS_TEAM_DOMAIN: must be https://<team>.cloudflareaccess.com, with no path.',
+      );
+    }
+    if (!/^[A-Za-z0-9]{32,128}$/.test(accessAudience)) {
+      issues.push("OPERATOR_ACCESS_AUDIENCE: must be the Access application's AUD tag.");
+    }
+    operatorAccess = { teamDomain, audience: accessAudience };
+  }
+
   // Production names its signing backend, so a deployment meant for KMS can never start on the
   // FILE default (ADR-0008).
   if (raw.NODE_ENV === 'production' && source['LICENCE_SIGNING_BACKEND'] === undefined) {
@@ -274,6 +307,7 @@ export function loadEnvironment(
     operatorPublicKeys,
     /** Empty means no list: every subject of the operator organisation, as far as this check goes. */
     operatorSubjects: new Set(operatorSubjects),
+    operatorAccess,
     licencePrivateKey,
     licencePreviousPublicKeys,
   });

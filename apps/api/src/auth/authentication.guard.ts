@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -16,6 +17,12 @@ import { ENVIRONMENT, type Environment } from '../config/environment';
 import { CLOCK, type Clock } from '../core/clock';
 import { PrismaService } from '../core/prisma.service';
 import { RateLimiter } from '../core/rate-limit';
+import {
+  ACCESS_HEADER,
+  ACCESS_VERIFIER,
+  AccessKeysUnavailableError,
+  type CloudflareAccessVerifier,
+} from './cloudflare-access';
 import { AUDIENCE, PUBLIC_ROUTE, REQUIRED_PERMISSIONS } from './decorators';
 import { controlGrantsFrom, type ControlPermission } from './permissions';
 import type { AuthenticatedRequest, OperatorPrincipal, ServicePrincipal } from './principal';
@@ -29,12 +36,16 @@ import { parseServiceToken, secretMatches } from './service-credentials';
  *    route reads only an Identity access token; a service route reads only a service credential.
  *    A controller that declares neither is refused outright, so a forgotten decorator is a 403
  *    rather than an open door.
- * 3. An operator token is verified against Identity's public keys — signature, expiry, issuer,
+ * 3. When Cloudflare Access is configured (always, in production), an operator route first needs
+ *    the Access token the portal forwards: signed by the team's keys, for this application, and
+ *    naming a person. A request that went round Access has none.
+ * 4. An operator token is verified against Identity's public keys — signature, expiry, issuer,
  *    audience — must belong to Munaxa Group's own organisation and to an Identity session, must
  *    satisfy MFA when required and name a subject on the allow-list when one is set (ADR-0006),
  *    and must carry every permission the route names. Permissions come from the token's `perms`,
  *    filtered to this catalogue.
- * 4. A service credential must exist, be unrevoked, and match.
+ * 5. A service credential must exist, be unrevoked, and match. Products call service routes
+ *    directly, not through Access.
  */
 @Injectable()
 export class AuthenticationGuard implements CanActivate {
@@ -47,6 +58,7 @@ export class AuthenticationGuard implements CanActivate {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(RateLimiter) private readonly limiter: RateLimiter,
+    @Inject(ACCESS_VERIFIER) private readonly access: CloudflareAccessVerifier | null,
   ) {
     this.tokens = new TokenService({
       signer: new AsymmetricSigner(environment.OPERATOR_AUTH_ALGORITHM, [
@@ -85,6 +97,7 @@ export class AuthenticationGuard implements CanActivate {
     const bearer = bearerOf(request);
 
     if (audience === 'OPERATOR') {
+      await this.passedAccess(request);
       const operator = this.operatorFrom(bearer);
       const required = this.reflector.getAllAndOverride<ControlPermission[] | undefined>(
         REQUIRED_PERMISSIONS,
@@ -104,6 +117,26 @@ export class AuthenticationGuard implements CanActivate {
       return true;
     }
     throw new ForbiddenException('This route declares no audience.');
+  }
+
+  private async passedAccess(request: Request): Promise<void> {
+    if (this.access === null) return;
+    try {
+      await this.access.verify(request.header(ACCESS_HEADER));
+    } catch (error) {
+      if (error instanceof AccessKeysUnavailableError) {
+        this.logger.error({ reason: error.message }, 'Cloudflare Access keys unavailable');
+        throw new ServiceUnavailableException(
+          'Operator sign-in is unavailable. Try again shortly.',
+        );
+      }
+      // The reason, never the token.
+      this.logger.warn(
+        { reason: error instanceof Error ? error.message : 'unknown' },
+        'operator request without a valid Cloudflare Access token refused',
+      );
+      throw new UnauthorizedException('Sign in through Cloudflare Access.');
+    }
   }
 
   private operatorFrom(bearer: string | null): OperatorPrincipal {

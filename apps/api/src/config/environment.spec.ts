@@ -15,10 +15,19 @@ const base = {
   LICENCE_SIGNING_KID: 'licence-2026-1',
 };
 const reads = () => PRIVATE;
+const access = {
+  OPERATOR_ACCESS_TEAM_DOMAIN: 'https://munaxa.cloudflareaccess.com',
+  OPERATOR_ACCESS_AUDIENCE: 'd'.repeat(64),
+};
 
 describe('loadEnvironment', () => {
   it('accepts production with an operator allow-list, or with MFA required', () => {
-    const production = { ...base, NODE_ENV: 'production', LICENCE_SIGNING_BACKEND: 'FILE' };
+    const production = {
+      ...base,
+      ...access,
+      NODE_ENV: 'production',
+      LICENCE_SIGNING_BACKEND: 'FILE',
+    };
     expect(
       loadEnvironment({ ...production, OPERATOR_SUBJECT_ALLOWLIST: ' a , b ' }, reads)
         .operatorSubjects,
@@ -63,23 +72,73 @@ describe('loadEnvironment', () => {
     ],
     [
       'production without MFA and without an operator allow-list',
-      { NODE_ENV: 'production', LICENCE_SIGNING_BACKEND: 'FILE' },
+      { ...access, NODE_ENV: 'production', LICENCE_SIGNING_BACKEND: 'FILE' },
     ],
     [
       'production without an explicit signing backend',
-      { NODE_ENV: 'production', OPERATOR_SUBJECT_ALLOWLIST: 'operator-1' },
+      { ...access, NODE_ENV: 'production', OPERATOR_SUBJECT_ALLOWLIST: 'operator-1' },
     ],
     [
       'a plain-http issuer in production',
       {
+        ...access,
         NODE_ENV: 'production',
         LICENCE_SIGNING_BACKEND: 'FILE',
         OPERATOR_AUTH_ISSUER: 'http://munaxa.example/api/auth',
         OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
       },
     ],
+    [
+      'production without Cloudflare Access',
+      {
+        NODE_ENV: 'production',
+        LICENCE_SIGNING_BACKEND: 'FILE',
+        OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
+      },
+    ],
+    [
+      'an Access team domain without its audience',
+      { OPERATOR_ACCESS_TEAM_DOMAIN: access.OPERATOR_ACCESS_TEAM_DOMAIN },
+    ],
+    [
+      'an Access audience without its team domain',
+      { OPERATOR_ACCESS_AUDIENCE: access.OPERATOR_ACCESS_AUDIENCE },
+    ],
+    [
+      'an Access team domain over http',
+      { ...access, OPERATOR_ACCESS_TEAM_DOMAIN: 'http://munaxa.cloudflareaccess.com' },
+    ],
+    [
+      'an Access team domain on another host',
+      { ...access, OPERATOR_ACCESS_TEAM_DOMAIN: 'https://munaxa.example.com' },
+    ],
+    [
+      'an Access team domain with a path',
+      { ...access, OPERATOR_ACCESS_TEAM_DOMAIN: 'https://munaxa.cloudflareaccess.com/cdn-cgi' },
+    ],
+    [
+      'an Access audience that is not an AUD tag',
+      { ...access, OPERATOR_ACCESS_AUDIENCE: 'munaxa control' },
+    ],
   ])('refuses %s', (_label, patch) => {
     expect(() => loadEnvironment({ ...base, ...patch }, reads)).toThrow(ConfigurationError);
+  });
+
+  it('turns Cloudflare Access on with both settings, and leaves it off outside production without them', () => {
+    expect(loadEnvironment({ ...base, ...access }, reads).operatorAccess).toEqual({
+      teamDomain: 'https://munaxa.cloudflareaccess.com',
+      audience: 'd'.repeat(64),
+    });
+    expect(loadEnvironment(base, reads).operatorAccess).toBeNull();
+    const production = {
+      ...base,
+      NODE_ENV: 'production',
+      LICENCE_SIGNING_BACKEND: 'FILE',
+      OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
+    };
+    expect(() => loadEnvironment(production, reads)).toThrow(
+      /OPERATOR_ACCESS_TEAM_DOMAIN, OPERATOR_ACCESS_AUDIENCE: required in production/,
+    );
   });
 
   it('refuses a signing key that cannot be read or is not a private key', () => {

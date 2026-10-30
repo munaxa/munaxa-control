@@ -77,6 +77,8 @@ Build `pnpm --filter @control/api build`; run `node apps/api/dist/main.js` (or t
 | `OPERATOR_AUTH_PUBLIC_KEYS`                                                    | Identity's **public** key(s)                                                   |
 | `OPERATOR_ORGANISATION_ID`                                                     | The Identity organisation Munaxa Group staff belong to                         |
 | `OPERATOR_REQUIRE_MFA`                                                         | `true` as soon as Identity issues `mfa` claims                                 |
+| `OPERATOR_SUBJECT_ALLOWLIST`                                                   | Identity subjects allowed to operate; required in production while MFA is off  |
+| `OPERATOR_ACCESS_TEAM_DOMAIN`, `OPERATOR_ACCESS_AUDIENCE`                      | Cloudflare Access; required in production (below)                              |
 | `LICENCE_SIGNING_PRIVATE_KEY_FILE`                                             | A mounted secret file, mode 0400 (`licence-signing.md`)                        |
 | `LICENCE_SIGNING_KID`, `LICENCE_PREVIOUS_PUBLIC_KEYS`, `LICENCE_MAX_TERM_DAYS` | `licence-signing.md`                                                           |
 | `ENTITLEMENT_CACHE_SECONDS`                                                    | 30 — how long products may reuse an answer                                     |
@@ -105,8 +107,33 @@ alert on that.
 
 Build `pnpm --filter @control/portal build`; run the standalone server
 `node apps/portal/.next/standalone/apps/portal/server.js` (not `next start`), with
-`CONTROL_API_URL` (the API's private URL), `PORT` and `NODE_ENV=production`. It holds no secret and
-no state.
+`CONTROL_API_URL` (the API's private URL), `PORT`, `NODE_ENV=production` and the same
+`OPERATOR_ACCESS_TEAM_DOMAIN` and `OPERATOR_ACCESS_AUDIENCE` as the API. It holds no secret and no
+state. Point the load balancer health check at `GET /healthz`: every other path, assets included,
+answers 401 without a Cloudflare Access token.
+
+## Cloudflare Access
+
+The operator console sits behind a Cloudflare Access self-hosted application (testing:
+`operator-test.munaxa.com`). Access signs a JWT for every request it lets through and sends it in
+`Cf-Access-Jwt-Assertion`. Both the portal (its middleware) and the API (every operator route)
+verify it: RS256 against the keys at `<team domain>/cdn-cgi/access/certs`, the team domain as
+`iss`, the application's AUD tag in `aud`, `exp`, `nbf` and `iat` within the clock skew, `type`
+`app`, and an `email` and `sub` (a service token is not an operator). The portal forwards the
+header with each API call.
+
+- It fails closed: no token, a bad one, or keys that cannot be read give 401 or 503, never a page.
+  In production the processes refuse to run open: the API stops at startup and the portal answers
+  503 without both values.
+- It adds to Identity, never replaces it: the Identity token, the operator organisation, the
+  subject allow-list and route permissions are still checked. Product routes and `/health/*` do not
+  go through Access; they keep their own credentials.
+- Configure, in Cloudflare Zero Trust: a self-hosted application on the operator hostname covering
+  every path (no bypass policy), an Allow policy naming the operators' emails, a short session
+  duration, and no service-token policy. Copy the team domain
+  (`https://<team>.cloudflareaccess.com`) and the application's AUD tag into both services.
+- The origin must not be reachable round Access: keep the ALB rule limited to Cloudflare's ranges
+  or behind a tunnel; the token check is the second line, not the only one.
 
 ## Munaxa Identity
 
@@ -140,7 +167,7 @@ The shared AWS stack in `munaxa-platform/infra/aws` (draft) hosts Control in `eu
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | Images                   | `.github/workflows/publish-images.yml` pushes `api`, `migrate` and `portal` to ECR on an `image/<sha>` tag             |
 | `control-api.munaxa.com` | ALB host rule to the API; `/api/v1/admin/*` answers 403 there                                                          |
-| Operator front door      | `operator.munaxa.com`, only from the operator ranges: `/api/auth/*` to Identity, the rest to the portal                |
+| Operator front door      | `operator-test.munaxa.com` behind Cloudflare Access: `/api/auth/*` to Identity, the rest to the portal                 |
 | `CONTROL_API_URL`        | `http://control-api.<env>.munaxa.internal:3100` (Cloud Map), reachable from the portal only                            |
 | Signing key              | `LICENCE_SIGNING_BACKEND=KMS` with a P-256 KMS key (ADR-0008, proposed)                                                |
 | Database                 | `control` on the shared PostgreSQL 16 instance; `control_owner` in the migrate bundle, `control_app` in the API bundle |

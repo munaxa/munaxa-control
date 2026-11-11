@@ -6,7 +6,7 @@
 | ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | The `control` database          | PostgreSQL 16                                 | Continuous archiving with point-in-time recovery, 35-day window; a daily logical dump (`pg_dump -Fc`) kept 90 days, encrypted, in another region |
 | The licence signing private key | Secret store                                  | Offline copy, encrypted, under two-person control, in two places                                                                                 |
-| The configuration               | Secret store and the deployment's environment | Infrastructure as code (`infra/terraform/`) plus the secret store's own versioning                                                               |
+| The configuration               | Secret store and the deployment's environment | Infrastructure as code (`munaxa-platform` `infra/aws/`) plus the secret store's own versioning                                                   |
 
 Nothing else is state: the API and the portal are stateless.
 

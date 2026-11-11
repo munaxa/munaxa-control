@@ -68,7 +68,7 @@ const schema = z.object({
 
   /**
    * Where the licence signing key lives. `FILE`: a mounted private key in this process (ADR-0003).
-   * `KMS`: an AWS KMS key the process can ask to sign but never read (ADR-0008, proposed).
+   * `KMS`: an AWS KMS key the process can ask to sign but never read (ADR-0008, accepted).
    * Required in production; `FILE` elsewhere when unset.
    */
   LICENCE_SIGNING_BACKEND: z.enum(['FILE', 'KMS']).default('FILE'),

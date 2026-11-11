@@ -27,7 +27,8 @@ When the deployment target is chosen and authorised:
 - The licence signing key is an `ECC_NIST_P256` KMS key (`LICENCE_SIGNING_BACKEND=KMS`, ADR-0008,
   accepted). A file key on Fargate would need an init container writing the PEM to a task-scoped
   volume, which rests on encrypted ephemeral disk because Fargate has no in-memory volume.
-- Infrastructure goes in `infra/terraform/` with the rest of the account (its README), never by hand.
+- Infrastructure goes in the shared AWS stack, `munaxa-platform` `infra/aws/` (Control's services and its
+  KMS licence key are in `stack/services.tf`, its secret bundle in `stack/data.tf`), never by hand.
 
 ## If one leaks
 

@@ -134,7 +134,7 @@ jobs:
           # The registry credential for @munaxa/* as a BuildKit secret, never a build argument. The
           # same token CI builds with, so a publish cannot fail where CI passed.
           secrets: |
-            node_auth_token=${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+            node_auth_token=${{ secrets.GITHUB_TOKEN }}
 
       - name: Record the digest
         env:

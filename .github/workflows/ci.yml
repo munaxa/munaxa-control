@@ -47,26 +47,29 @@ jobs:
       TEST_DATABASE_URL: postgresql://control_app@localhost:5432/control
       TEST_DATABASE_MIGRATION_URL: postgresql://control_owner@localhost:5432/control
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           registry-url: 'https://npm.pkg.github.com'
           scope: '@munaxa'
 
-      # `@munaxa/*` is published from munaxa-platform to GitHub Packages. This repository's
-      # GITHUB_TOKEN reads it only if the packages have been granted to this repository;
-      # PLATFORM_PACKAGES_TOKEN is the named alternative, as in the product repositories.
+      # `@munaxa/*` is published from munaxa-platform to GitHub Packages. This run's own
+      # GITHUB_TOKEN (packages: read above) reads it because each package grants this repository
+      # read access. No long-lived package token: a repository secret is readable by any workflow
+      # pushed to any branch. A 403 here is fixed in the package's "Manage Actions access".
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prisma generate
         run: pnpm prisma:generate
@@ -118,8 +121,10 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v6
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       # Built, not pushed: publishing an image is a release step that needs its own authorisation.
       - name: Build api, migrate and portal
         run: |
@@ -129,4 +134,4 @@ jobs:
               --target "$target" -t "munaxa-control-$target:ci" --load .
           done
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

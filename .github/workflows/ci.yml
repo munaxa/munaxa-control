@@ -128,5 +128,11 @@ jobs:
             docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
               --target "$target" -t "munaxa-control-$target:ci" --load .
           done
+      - name: Verify the images (Alpine, zlib, packages, Prisma engine, not root)
+        run: |
+          set -euo pipefail
+          for target in api migrate portal; do
+            .github/scripts/verify-image.sh "munaxa-control-$target:ci" "$target"
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}

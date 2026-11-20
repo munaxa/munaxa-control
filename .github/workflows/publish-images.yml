@@ -136,6 +136,19 @@ jobs:
           secrets: |
             node_auth_token=${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
+      # The exact digest that was pushed, pulled back and checked like CI checks its build. A
+      # failure here leaves the image in ECR (tags are immutable) but marks the release failed, so
+      # nobody pins it.
+      - name: Verify the pushed image
+        env:
+          TARGET: ${{ matrix.target }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          REF="$REGISTRY/munaxa-control/$TARGET@$DIGEST"
+          docker pull -q "$REF" >/dev/null
+          .github/scripts/verify-image.sh "$REF" "$TARGET"
+
       - name: Record the digest
         env:
           TARGET: ${{ matrix.target }}

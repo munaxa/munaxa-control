@@ -6,7 +6,8 @@
 #   portal   the Super Admin portal, Next.js standalone server. Holds no secret.
 #
 # Reproducible: the base image is pinned by digest, pnpm by version through corepack, and every
-# dependency by the committed lockfile (`--frozen-lockfile`). The registry credential for `@munaxa/*`
+# dependency by the committed lockfile (`--frozen-lockfile`). The one deliberate exception is the Debian
+# security upgrade in the `os` and `portal` stages, which takes the fixes current at build time. The registry credential for `@munaxa/*`
 # (GitHub Packages, read:packages) is a BuildKit secret: it exists for the install step only and is
 # never written to a layer.
 #
@@ -16,7 +17,11 @@
 # Nothing here holds the licence signing key: with KMS (ADR-0008) it never leaves AWS KMS, and with
 # FILE it is mounted at run time (docs/operations/).
 
-ARG NODE_IMAGE=node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
+# Refreshed 20 Nov 2026 (multi-platform index of node:22-bookworm-slim published that day): the
+# 8 Nov images built on the previous pin scan with 7 HIGH Debian findings (apt, util-linux, zlib,
+# glibc). The `os` and `portal` stages also upgrade the Debian packages, so a rebuild picks up fixes published
+# after the pin; ECR's scan on push checks the result before any Testing pin.
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
 # Empty unless a build overrides it (`--build-context vendor=<dir>`) to supply packages that are not
 # yet on the registry — only for verifying this file before `@munaxa/licensing` is published.
@@ -25,6 +30,7 @@ FROM scratch AS vendor
 FROM ${NODE_IMAGE} AS os
 # OpenSSL for Prisma's query engine, which otherwise guesses the library version and may not load.
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends openssl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
@@ -89,6 +95,9 @@ CMD ["node", "scripts/migrate.mjs"]
 
 # --- portal --------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS portal
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3200 \

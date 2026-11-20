@@ -116,13 +116,15 @@ jobs:
       - name: Sign in to ECR
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
 
-      - name: Build and push
-        id: build
+      # Built and loaded locally first, verified and scanned, and only then pushed: an image with a
+      # HIGH or CRITICAL finding, or one that fails verification, never reaches ECR.
+      - name: Build (not pushed yet)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: ${{ matrix.target }}
-          push: true
+          push: false
+          load: true
           provenance: false # a single-platform manifest, so the digest names the image
           sbom: false
           tags: |
@@ -135,6 +137,51 @@ jobs:
           # same token CI builds with, so a publish cannot fail where CI passed.
           secrets: |
             node_auth_token=${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Verify and scan before pushing
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          REF="$REGISTRY/munaxa-control/$TARGET:sha-$SHA"
+          .github/scripts/verify-image.sh "$REF" "$TARGET"
+          .github/scripts/scan-image.sh "$REF" "control-$TARGET" image-reports
+
+      - name: Keep the SBOM and scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-reports-${{ matrix.target }}
+          path: image-reports/
+          if-no-files-found: warn
+          retention-days: 400
+
+      - name: Push
+        id: build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          repo="$REGISTRY/munaxa-control/$TARGET"
+          docker push -q "$repo:$SHORT" >/dev/null
+          docker push -q "$repo:sha-$SHA" >/dev/null
+          digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$repo:sha-$SHA" | sed -n "s#^$repo@##p" | head -n1)"
+          printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "::error::no pushed digest for $repo"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # The exact digest that was pushed, pulled back and checked like CI checks its build. A
+      # failure here leaves the image in ECR (tags are immutable) but marks the release failed, so
+      # nobody pins it.
+      - name: Verify the pushed image
+        env:
+          TARGET: ${{ matrix.target }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          REF="$REGISTRY/munaxa-control/$TARGET@$DIGEST"
+          docker rmi -f "$REGISTRY/munaxa-control/$TARGET:sha-$SHA" "$REGISTRY/munaxa-control/$TARGET:$SHORT" >/dev/null
+          docker pull -q "$REF" >/dev/null
+          .github/scripts/verify-image.sh "$REF" "$TARGET"
 
       - name: Record the digest
         env:

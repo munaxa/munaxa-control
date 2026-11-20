@@ -44,7 +44,8 @@
     "overrides": {
       "multer": "^2.5.0",
       "deepmerge-ts": "^8.0.2",
-      "postcss": "^8.5.25"
+      "postcss": "^8.5.25",
+      "effect": "^3.22.1"
     }
   },
   "dependencies": {

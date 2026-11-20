@@ -121,18 +121,45 @@ jobs:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v3
       # Built, not pushed: publishing an image is a release step that needs its own authorisation.
+      #
+      # NODE_AUTH_TOKEN must be on THIS step: `--secret id=node_auth_token,env=NODE_AUTH_TOKEN` reads
+      # the variable from the step's environment, and without it BuildKit mounts an empty secret, so
+      # the install inside the build reaches GitHub Packages with no token and gets HTTP 401 for
+      # @munaxa/auth (run 44792718241, 20 Nov 2026). The verify job installs with the same
+      # expression and passes, which is what places the fault here and not in a package grant.
       - name: Build api, migrate and portal
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::no package token reached this step (PLATFORM_PACKAGES_TOKEN or GITHUB_TOKEN)"; exit 1
+          fi
           for target in api migrate portal; do
             docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
               --target "$target" -t "munaxa-control-$target:ci" --load .
           done
-      - name: Verify the images (Alpine, zlib, packages, Prisma engine, not root)
+      - name: Verify the images (Alpine, zlib, packages, loaded libraries, Prisma engine, not root)
         run: |
           set -euo pipefail
           for target in api migrate portal; do
             .github/scripts/verify-image.sh "munaxa-control-$target:ci" "$target"
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+      # A vulnerability scan of the images just built (OS and npm packages), failing on HIGH or
+      # CRITICAL. This is CI's own scan; ECR's scan of a published digest is separate evidence.
+      - name: Scan the images (SBOM, HIGH and CRITICAL fail)
+        run: |
+          set -euo pipefail
+          status=0
+          for target in api migrate portal; do
+            .github/scripts/scan-image.sh "munaxa-control-$target:ci" "control-$target" image-reports || status=1
+          done
+          exit $status
+      - name: Keep the SBOMs and scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-reports
+          path: image-reports/
+          if-no-files-found: warn
+          retention-days: 90

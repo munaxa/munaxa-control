@@ -14,9 +14,12 @@
 #   5. The operating-system packages are the pinned base's plus openssl and ca-certificates only.
 #   6. api and migrate: the Prisma query engine for linux-musl-openssl-3.0.x is present and loads
 #      (a wrong engine target is otherwise found only when the service first queries).
+#   7. The libraries a running Node process actually maps (read from /proc/self/maps after loading
+#      the Prisma engine where there is one): the musl loader, no glibc, and every shared object
+#      outside node_modules owned by an installed Alpine package, so the scanner sees all of them.
 #
-# A passing run is not a vulnerability scan: ECR's scan on push of the released digest is the
-# evidence that the findings are gone.
+# A passing run is not a vulnerability scan: scan-image.sh is CI's scan, and ECR's scan on push
+# of the released digest is the registry's evidence.
 set -euo pipefail
 
 REF="${1:?usage: verify-image.sh <image ref> <api|migrate|portal>}"
@@ -74,4 +77,25 @@ if [ "$TARGET" != "portal" ]; then
   done
 fi
 
-echo "$REF ($TARGET): linux/amd64, user $user, Alpine $(in_image 'cat /etc/alpine-release'), zlib $zlib, packages = base + openssl, ca-certificates"
+# 7. What the loader really maps, not what the package database says.
+maps_js='const e=process.argv[1]; if (e) process.dlopen({ exports: {} }, e);
+const seen=new Set(); for (const l of require("fs").readFileSync("/proc/self/maps","utf8").split("\n")) {
+  const f=l.split(/\s+/)[5]; if (f && f.startsWith("/") && /\.so(\.|$)|\.node$/.test(f)) seen.add(f); }
+console.log([...seen].join("\n"));'
+engine=""
+[ "$TARGET" = "portal" ] || engine="$(in_image "find / -xdev -name 'libquery_engine-linux-musl-openssl-3.0.x.so.node' 2>/dev/null | head -n1")"
+mapped="$(docker run --rm --entrypoint node "$REF" -e "$maps_js" "$engine")"
+[ -n "$mapped" ] || fail "no shared object mapped by node (cannot verify loaded libraries)"
+echo "$mapped" | grep -q '/ld-musl-x86_64\.so\.1$' || fail "node is not running on the musl loader: $(echo "$mapped" | tr '\n' ' ')"
+if echo "$mapped" | grep -qE '(ld-linux|libc\.so\.6|/x86_64-linux-gnu/)'; then
+  fail "a glibc library is mapped: $(echo "$mapped" | grep -E '(ld-linux|libc\.so\.6|/x86_64-linux-gnu/)' | tr '\n' ' ')"
+fi
+unowned=""
+for f in $(echo "$mapped" | grep -v '/node_modules/'); do
+  real="$(in_image "readlink -f '$f'")"
+  in_image "apk info -W '$real' >/dev/null 2>&1" || unowned="$unowned $real"
+done
+[ -z "$unowned" ] || fail "mapped libraries no Alpine package owns:$unowned"
+loaded="$(echo "$mapped" | sed 's#.*/##' | sort -u | tr '\n' ' ')"
+
+echo "$REF ($TARGET): linux/amd64, user $user, Alpine $(in_image 'cat /etc/alpine-release'), zlib $zlib, packages = base + openssl, ca-certificates; mapped: $loaded"

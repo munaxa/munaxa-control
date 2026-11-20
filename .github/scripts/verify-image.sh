@@ -20,6 +20,7 @@
 #
 # A passing run is not a vulnerability scan: scan-image.sh is CI's scan, and ECR's scan on push
 # of the released digest is the registry's evidence.
+#   Also: libssl3 and libcrypto3 at or above 3.5.9-r1, and no npm, npx, corepack, yarn or pnpm.
 set -euo pipefail
 
 REF="${1:?usage: verify-image.sh <image ref> <api|migrate|portal>}"
@@ -68,7 +69,9 @@ added="$(comm -13 <(echo "$want") <(echo "$have") | grep -vxE 'openssl|ca-certif
 [ -z "$added" ] || fail "packages beyond openssl and ca-certificates were added: $added"
 
 if [ "$TARGET" != "portal" ]; then
-  engines="$(in_image "find / -xdev -name 'libquery_engine-*.so.node' 2>/dev/null")"
+  # As root for this read only: as `node`, find exits 1 on the directories it may not read, which
+  # under `set -e` ended the script with no message (CI run of 20 Nov 2026, 22:02 UTC).
+  engines="$(docker run --rm --user 0 --entrypoint sh "$REF" -c "find / -xdev -name 'libquery_engine-*.so.node' 2>/dev/null || true")"
   echo "$engines" | grep -q 'libquery_engine-linux-musl-openssl-3.0.x.so.node' \
     || fail "no linux-musl-openssl-3.0.x Prisma engine (found: $(echo "$engines" | tr '\n' ' '))"
   for e in $(echo "$engines" | grep 'linux-musl-openssl-3.0.x'); do
@@ -77,14 +80,28 @@ if [ "$TARGET" != "portal" ]; then
   done
 fi
 
+# OpenSSL at or above Alpine's 3.5.9-r1 (4 HIGH in 3.5.9-r0, Grype scan of 20 Nov 2026), and no
+# package manager or Node tooling (npm, npx, corepack, yarn, pnpm) left in the image.
+for want in libssl3=3.5.9-r1 libcrypto3=3.5.9-r1; do
+  name="${want%%=*}"
+  have_v="$(in_image "apk info -v 2>/dev/null | sed -n 's/^$name-\([0-9][^ ]*\)\$/\1/p'")"
+  [ -n "$have_v" ] || fail "$name is not installed as a package"
+  case "$(in_image "apk version -t '$have_v' '${want#*=}'" || true)" in
+    '='|'>') ;;
+    *) fail "$name $have_v is older than ${want#*=}" ;;
+  esac
+done
+tooling="$(docker run --rm --user 0 --entrypoint sh "$REF" -c 'for p in /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/pnpm /opt/yarn-v* /root/.cache/node; do [ -e "$p" ] && echo "$p"; done; true')"
+[ -z "$tooling" ] || fail "Node tooling present at run time: $(echo "$tooling" | tr '\n' ' ')"
+
 # 7. What the loader really maps, not what the package database says.
 maps_js='const e=process.argv[1]; if (e) process.dlopen({ exports: {} }, e);
 const seen=new Set(); for (const l of require("fs").readFileSync("/proc/self/maps","utf8").split("\n")) {
   const f=l.split(/\s+/)[5]; if (f && f.startsWith("/") && /\.so(\.|$)|\.node$/.test(f)) seen.add(f); }
 console.log([...seen].join("\n"));'
 engine=""
-[ "$TARGET" = "portal" ] || engine="$(in_image "find / -xdev -name 'libquery_engine-linux-musl-openssl-3.0.x.so.node' 2>/dev/null | head -n1")"
-mapped="$(docker run --rm --entrypoint node "$REF" -e "$maps_js" "$engine")"
+[ "$TARGET" = "portal" ] || engine="$(echo "$engines" | grep 'linux-musl-openssl-3.0.x' | head -n1)"
+mapped="$(docker run --rm --entrypoint node "$REF" -e "$maps_js" "$engine")" || fail "node could not start or load $engine"
 [ -n "$mapped" ] || fail "no shared object mapped by node (cannot verify loaded libraries)"
 echo "$mapped" | grep -q '/ld-musl-x86_64\.so\.1$' || fail "node is not running on the musl loader: $(echo "$mapped" | tr '\n' ' ')"
 if echo "$mapped" | grep -qE '(ld-linux|libc\.so\.6|/x86_64-linux-gnu/)'; then

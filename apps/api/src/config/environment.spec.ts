@@ -89,11 +89,19 @@ describe('loadEnvironment', () => {
       },
     ],
     [
-      'production without Cloudflare Access',
+      'production without Cloudflare Access and without MFA',
       {
         NODE_ENV: 'production',
         LICENCE_SIGNING_BACKEND: 'FILE',
         OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
+      },
+    ],
+    [
+      'production without Cloudflare Access and without an operator allow-list',
+      {
+        NODE_ENV: 'production',
+        LICENCE_SIGNING_BACKEND: 'FILE',
+        OPERATOR_REQUIRE_MFA: 'true',
       },
     ],
     [
@@ -124,12 +132,15 @@ describe('loadEnvironment', () => {
     expect(() => loadEnvironment({ ...base, ...patch }, reads)).toThrow(ConfigurationError);
   });
 
-  it('turns Cloudflare Access on with both settings, and leaves it off outside production without them', () => {
+  it('turns Cloudflare Access on with both settings, and leaves it off without them', () => {
     expect(loadEnvironment({ ...base, ...access }, reads).operatorAccess).toEqual({
       teamDomain: 'https://munaxa.cloudflareaccess.com',
       audience: 'd'.repeat(64),
     });
     expect(loadEnvironment(base, reads).operatorAccess).toBeNull();
+  });
+
+  it('runs production without Cloudflare Access only with Identity MFA and an allow-list', () => {
     const production = {
       ...base,
       NODE_ENV: 'production',
@@ -137,8 +148,18 @@ describe('loadEnvironment', () => {
       OPERATOR_SUBJECT_ALLOWLIST: 'operator-1',
     };
     expect(() => loadEnvironment(production, reads)).toThrow(
-      /OPERATOR_ACCESS_TEAM_DOMAIN, OPERATOR_ACCESS_AUDIENCE: required in production/,
+      /OPERATOR_REQUIRE_MFA: must be true in production without Cloudflare Access/,
     );
+    expect(() =>
+      loadEnvironment(
+        { ...production, OPERATOR_REQUIRE_MFA: 'true', OPERATOR_SUBJECT_ALLOWLIST: '' },
+        reads,
+      ),
+    ).toThrow(/OPERATOR_SUBJECT_ALLOWLIST: required in production without Cloudflare Access/);
+    const environment = loadEnvironment({ ...production, OPERATOR_REQUIRE_MFA: 'true' }, reads);
+    expect(environment.operatorAccess).toBeNull();
+    expect(environment.OPERATOR_REQUIRE_MFA).toBe(true);
+    expect(environment.operatorSubjects).toEqual(new Set(['operator-1']));
   });
 
   it('refuses a signing key that cannot be read or is not a private key', () => {

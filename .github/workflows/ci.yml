@@ -61,12 +61,12 @@ jobs:
           scope: '@munaxa'
 
       # `@munaxa/*` is published from munaxa-platform to GitHub Packages. This repository's
-      # GITHUB_TOKEN reads it only if the packages have been granted to this repository;
-      # PLATFORM_PACKAGES_TOKEN is the named alternative, as in the product repositories.
+      # per-run GITHUB_TOKEN reads it once the packages grant this repository Actions access; no
+      # long-lived token is used (a branch author's workflow could read a repository secret).
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prisma generate
         run: pnpm prisma:generate
@@ -129,11 +129,11 @@ jobs:
       # expression and passes, which is what places the fault here and not in a package grant.
       - name: Build api, migrate and portal
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.PLATFORM_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::no package token reached this step (PLATFORM_PACKAGES_TOKEN or GITHUB_TOKEN)"; exit 1
+            echo "::error::no package token reached this step (GITHUB_TOKEN)"; exit 1
           fi
           for target in api migrate portal; do
             docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \

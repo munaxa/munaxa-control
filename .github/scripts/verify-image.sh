@@ -11,7 +11,7 @@
 #   3. Alpine (musl): no glibc and no util-linux package, the sources of 4 of the 7 HIGH findings
 #      in the 8 Nov Debian images (report 2026-11-20-rds-rotation-and-docs-first-approvals).
 #   4. zlib at or above 1.4-r0 (CVE-2026-4738), and the libz the loader maps is that package's.
-#   5. The operating-system packages are the pinned base's plus openssl and ca-certificates only.
+#   5. The operating-system packages are the pinned base's plus ca-certificates only (no openssl CLI).
 #   6. api and migrate: the Prisma query engine for linux-musl-openssl-3.0.x is present and loads
 #      (a wrong engine target is otherwise found only when the service first queries).
 #   7. The libraries a running Node process actually maps (read from /proc/self/maps after loading
@@ -20,7 +20,7 @@
 #
 # A passing run is not a vulnerability scan: scan-image.sh is CI's scan, and ECR's scan on push
 # of the released digest is the registry's evidence.
-#   Also: libssl3 and libcrypto3 at or above 3.5.9-r1, and no npm, npx, corepack, yarn or pnpm.
+#   Also: libssl3 and libcrypto3 at or above 3.5.10-r0, and no npm, npx, corepack, yarn or pnpm.
 set -euo pipefail
 
 REF="${1:?usage: verify-image.sh <image ref> <api|migrate|portal>}"
@@ -64,9 +64,9 @@ docker image inspect "$base" >/dev/null 2>&1 || docker pull -q "$base" >/dev/nul
 want="$(docker run --rm --entrypoint sh "$base" -c "apk info 2>/dev/null | sort")"
 have="$(in_image "apk info 2>/dev/null | sort")"
 removed="$(comm -23 <(echo "$want") <(echo "$have") | tr '\n' ' ')"
-added="$(comm -13 <(echo "$want") <(echo "$have") | grep -vxE 'openssl|ca-certificates' | tr '\n' ' ' || true)"
+added="$(comm -13 <(echo "$want") <(echo "$have") | grep -vxE 'ca-certificates' | tr '\n' ' ' || true)"
 [ -z "$removed" ] || fail "packages of the base are missing: $removed"
-[ -z "$added" ] || fail "packages beyond openssl and ca-certificates were added: $added"
+[ -z "$added" ] || fail "packages beyond ca-certificates were added: $added"
 
 if [ "$TARGET" != "portal" ]; then
   # As root for this read only: as `node`, find exits 1 on the directories it may not read, which
@@ -80,9 +80,9 @@ if [ "$TARGET" != "portal" ]; then
   done
 fi
 
-# OpenSSL at or above Alpine's 3.5.9-r1 (4 HIGH in 3.5.9-r0, Grype scan of 20 Nov 2026), and no
+# OpenSSL at or above Alpine's 3.5.10-r0 (5 HIGH in 3.5.9-r1, OpenSSL advisory of 17 Nov 2026), and no
 # package manager or Node tooling (npm, npx, corepack, yarn, pnpm) left in the image.
-for want in libssl3=3.5.9-r1 libcrypto3=3.5.9-r1; do
+for want in libssl3=3.5.10-r0 libcrypto3=3.5.10-r0; do
   name="${want%%=*}"
   have_v="$(in_image "apk info -v 2>/dev/null | sed -n 's/^$name-\([0-9][^ ]*\)\$/\1/p'")"
   [ -n "$have_v" ] || fail "$name is not installed as a package"
@@ -115,4 +115,4 @@ done
 [ -z "$unowned" ] || fail "mapped libraries no Alpine package owns:$unowned"
 loaded="$(echo "$mapped" | sed 's#.*/##' | sort -u | tr '\n' ' ')"
 
-echo "$REF ($TARGET): linux/amd64, user $user, Alpine $(in_image 'cat /etc/alpine-release'), zlib $zlib, packages = base + openssl, ca-certificates; mapped: $loaded"
+echo "$REF ($TARGET): linux/amd64, user $user, Alpine $(in_image 'cat /etc/alpine-release'), zlib $zlib, packages = base + ca-certificates; mapped: $loaded"

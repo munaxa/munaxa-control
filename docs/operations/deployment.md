@@ -69,23 +69,23 @@ done
 Build `pnpm --filter @control/api build`; run `node apps/api/dist/main.js` (or the `api` image). Configuration is
 `.env.example`; everything is validated at startup and a bad value stops the process.
 
-| Variable                                                                       | Notes                                                                          |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `DATABASE_URL`                                                                 | `control_app`. From the secret store                                           |
-| `OPERATOR_AUTH_ISSUER`                                                         | Identity's `IDENTITY_BASE_URL`, character for character; `https` in production |
-| `OPERATOR_AUTH_AUDIENCE`                                                       | `munaxa-control` — and Identity's `IDENTITY_AUTH_AUDIENCE` must include it     |
-| `OPERATOR_AUTH_PUBLIC_KEYS`                                                    | Identity's **public** key(s)                                                   |
-| `OPERATOR_ORGANISATION_ID`                                                     | The Identity organisation Munaxa Group staff belong to                         |
-| `OPERATOR_REQUIRE_MFA`                                                         | `true` as soon as Identity issues `mfa` claims                                 |
-| `OPERATOR_SUBJECT_ALLOWLIST`                                                   | Identity subjects allowed to operate; required in production while MFA is off  |
-| `OPERATOR_ACCESS_TEAM_DOMAIN`, `OPERATOR_ACCESS_AUDIENCE`                      | Cloudflare Access; required in production (below)                              |
-| `LICENCE_SIGNING_PRIVATE_KEY_FILE`                                             | A mounted secret file, mode 0400 (`licence-signing.md`)                        |
-| `LICENCE_SIGNING_KID`, `LICENCE_PREVIOUS_PUBLIC_KEYS`, `LICENCE_MAX_TERM_DAYS` | `licence-signing.md`                                                           |
-| `ENTITLEMENT_CACHE_SECONDS`                                                    | 30 — how long products may reuse an answer                                     |
-| `IDEMPOTENCY_RETENTION_HOURS`                                                  | 48                                                                             |
-| `TRUST_PROXY_HOPS`                                                             | `1` behind one load balancer; `0` (default) trusts no `X-Forwarded-For`        |
-| `RATE_LIMIT_PER_MINUTE`, `SERVICE_RATE_LIMIT_PER_MINUTE`                       | 600 per address, 6 000 per product credential (ADR-0007)                       |
-| `AUTH_FAILURE_LIMIT_PER_MINUTE`                                                | 20 refused credentials per address before it is refused for the minute         |
+| Variable                                                                       | Notes                                                                                                               |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                                 | `control_app`. From the secret store                                                                                |
+| `OPERATOR_AUTH_ISSUER`                                                         | Identity's `IDENTITY_BASE_URL`, character for character; `https` in production                                      |
+| `OPERATOR_AUTH_AUDIENCE`                                                       | `munaxa-control` — and Identity's `IDENTITY_AUTH_AUDIENCE` must include it                                          |
+| `OPERATOR_AUTH_PUBLIC_KEYS`                                                    | Identity's **public** key(s)                                                                                        |
+| `OPERATOR_ORGANISATION_ID`                                                     | The Identity organisation Munaxa Group staff belong to                                                              |
+| `OPERATOR_REQUIRE_MFA`                                                         | `true`; required in production without Cloudflare Access (Identity issues `mfa`)                                    |
+| `OPERATOR_SUBJECT_ALLOWLIST`                                                   | Identity subjects allowed to operate; required in production while MFA is off, and always without Cloudflare Access |
+| `OPERATOR_ACCESS_TEAM_DOMAIN`, `OPERATOR_ACCESS_AUDIENCE`                      | Optional Cloudflare Access layer; both or neither (below)                                                           |
+| `LICENCE_SIGNING_PRIVATE_KEY_FILE`                                             | A mounted secret file, mode 0400 (`licence-signing.md`)                                                             |
+| `LICENCE_SIGNING_KID`, `LICENCE_PREVIOUS_PUBLIC_KEYS`, `LICENCE_MAX_TERM_DAYS` | `licence-signing.md`                                                                                                |
+| `ENTITLEMENT_CACHE_SECONDS`                                                    | 30 — how long products may reuse an answer                                                                          |
+| `IDEMPOTENCY_RETENTION_HOURS`                                                  | 48                                                                                                                  |
+| `TRUST_PROXY_HOPS`                                                             | `1` behind one load balancer; `0` (default) trusts no `X-Forwarded-For`                                             |
+| `RATE_LIMIT_PER_MINUTE`, `SERVICE_RATE_LIMIT_PER_MINUTE`                       | 600 per address, 6 000 per product credential (ADR-0007)                                                            |
+| `AUTH_FAILURE_LIMIT_PER_MINUTE`                                                | 20 refused credentials per address before it is refused for the minute                                              |
 
 Probes: liveness `GET /health/live`, readiness `GET /health/ready` (the database answers). Logs are
 JSON lines on stdout (pino) with the request id; authorization headers and secrets are redacted.
@@ -107,15 +107,35 @@ alert on that.
 
 Build `pnpm --filter @control/portal build`; run the standalone server
 `node apps/portal/.next/standalone/apps/portal/server.js` (not `next start`), with
-`CONTROL_API_URL` (the API's private URL), `PORT`, `NODE_ENV=production` and the same
-`OPERATOR_ACCESS_TEAM_DOMAIN` and `OPERATOR_ACCESS_AUDIENCE` as the API. It holds no secret and no
-state. Point the load balancer health check at `GET /healthz`: every other path, assets included,
-answers 401 without a Cloudflare Access token.
+`CONTROL_API_URL` (the API's private URL), `PORT`, `NODE_ENV=production` and, only when the
+optional Cloudflare Access layer is used, the same `OPERATOR_ACCESS_TEAM_DOMAIN` and
+`OPERATOR_ACCESS_AUDIENCE` as the API. It holds no secret and no state. Point the load balancer
+health check at `GET /healthz`. With Access configured, every other path, assets included, answers
+401 without an Access token; without it, every page sends a person without a session to Munaxa
+Identity's sign-in.
+
+## Operator access (AWS-native default)
+
+Decision of 21 Nov 2026 (munaxa-platform `infra/aws/OPERATOR-ACCESS.md`): Cloudflare Access is
+**optional** and is not needed to deploy or operate Control. Without it:
+
+- **Application layer:** Munaxa Identity is the sign-in. Every operator route checks the Identity
+  token (signature, issuer, audience `munaxa-control`, expiry), the operator organisation, an
+  Identity session, `mfa: true` (`OPERATOR_REQUIRE_MFA=true`), the subject allow-list and the
+  route's permission. In production the API refuses to start without Access unless
+  `OPERATOR_REQUIRE_MFA=true` and `OPERATOR_SUBJECT_ALLOWLIST` is set.
+- **Network layer:** the load balancer forwards the operator host only from the operator's source
+  ranges (`operator_cidrs` in the shared stack) and answers 403 to everyone else. The DNS record is
+  DNS only (not proxied), so the load balancer sees the operator's own address.
+- AWS IAM Identity Center is for AWS infrastructure access only. It never signs anyone in to
+  Control.
+
+## Cloudflare Access (optional extra layer)
 
 ## Cloudflare Access
 
-The operator console sits behind a Cloudflare Access self-hosted application (testing:
-`operator-test.munaxa.com`). Access signs a JWT for every request it lets through and sends it in
+When used, the operator console sits behind a Cloudflare Access self-hosted application (it is
+not part of the Testing deployment). Access signs a JWT for every request it lets through and sends it in
 `Cf-Access-Jwt-Assertion`. Both the portal (its middleware) and the API (every operator route)
 verify it: RS256 against the keys at `<team domain>/cdn-cgi/access/certs`, the team domain as
 `iss`, the application's AUD tag in `aud`, `exp`, `nbf` and `iat` within the clock skew, `type`
@@ -123,8 +143,8 @@ verify it: RS256 against the keys at `<team domain>/cdn-cgi/access/certs`, the t
 header with each API call, licence and revocation-list downloads included.
 
 - It fails closed: no token, a bad one, or keys that cannot be read give 401 or 503, never a page.
-  In production the processes refuse to run open: the API stops at startup and the portal answers
-  503 without both values.
+  Half a configuration (one of the two values) stops the API at startup and makes the portal
+  answer 503.
 - It adds to Identity, never replaces it: the Identity token, the operator organisation, the
   subject allow-list and route permissions are still checked. Product routes and `/health/*` do not
   go through Access; they keep their own credentials.
@@ -167,7 +187,7 @@ The shared AWS stack in `munaxa-platform/infra/aws` (draft) hosts Control in `eu
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | Images                   | `.github/workflows/publish-images.yml` pushes `api`, `migrate` and `portal` to ECR on an `image/<sha>` tag             |
 | `control-api.munaxa.com` | ALB host rule to the API; `/api/v1/admin/*` answers 403 there                                                          |
-| Operator front door      | `operator-test.munaxa.com` behind Cloudflare Access: `/api/auth/*` to Identity, the rest to the portal                 |
+| Operator front door      | `operator-test.munaxa.com`, operator source ranges only: `/api/auth/*` to Identity, the rest to the portal             |
 | `CONTROL_API_URL`        | `http://control-api.<env>.munaxa.internal:3100` (Cloud Map), reachable from the portal only                            |
 | Signing key              | `LICENCE_SIGNING_BACKEND=KMS` with a P-256 KMS key (ADR-0008)                                                          |
 | Database                 | `control` on the shared PostgreSQL 16 instance; `control_owner` in the migrate bundle, `control_app` in the API bundle |

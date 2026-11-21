@@ -1,6 +1,10 @@
 /**
- * Cloudflare Access in front of the operator console (munaxa-platform `infra/aws/cloudflare-access.md`).
+ * Optional: Cloudflare Access in front of the operator console (munaxa-platform
+ * `infra/aws/cloudflare-access.md`). Off unless both settings are given; the AWS-native default
+ * (`infra/aws/OPERATOR-ACCESS.md`) restricts the operator host at the load balancer instead, and
+ * the Control API then requires Identity MFA and a subject allow-list in production.
  *
+ * When configured:
  * Access signs a JWT for every request it lets through, in `Cf-Access-Jwt-Assertion`. The
  * middleware refuses any request without a valid one, so a request sent straight to the load
  * balancer, round Access, gets no page, no script and no server action. The portal forwards the
@@ -31,17 +35,17 @@ const KEYS_MAX_AGE_MS = 60 * 60_000;
 const REFETCH_INTERVAL_MS = 60_000;
 
 /**
- * The configuration, `null` when Access is off (only outside production), or an error string when
- * it is incomplete or invalid, which the middleware answers with 503: production never runs open.
+ * The configuration, `null` when Access is off (neither setting given), or an error string when it
+ * is incomplete or invalid, which the middleware answers with 503: a half-configured Access never
+ * runs open. Whether production may run without Access is the API's decision (it then requires
+ * Identity MFA and an allow-list for every operator route), not the portal's.
  */
 export function accessConfigFrom(
   env: Readonly<Record<string, string | undefined>>,
 ): AccessConfig | null | string {
   const teamDomain = env['OPERATOR_ACCESS_TEAM_DOMAIN']?.trim() || undefined;
   const audience = env['OPERATOR_ACCESS_AUDIENCE']?.trim() || undefined;
-  if (teamDomain === undefined && audience === undefined) {
-    return env['NODE_ENV'] === 'production' ? 'Cloudflare Access is not configured.' : null;
-  }
+  if (teamDomain === undefined && audience === undefined) return null;
   if (teamDomain === undefined || audience === undefined) {
     return 'OPERATOR_ACCESS_TEAM_DOMAIN and OPERATOR_ACCESS_AUDIENCE: set both or neither.';
   }

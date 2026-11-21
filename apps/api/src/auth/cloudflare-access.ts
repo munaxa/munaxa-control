@@ -1,7 +1,9 @@
 import { createPublicKey, verify, type JsonWebKey, type KeyObject } from 'node:crypto';
 
 /**
- * Cloudflare Access in front of the operator console (munaxa-platform `infra/aws/cloudflare-access.md`).
+ * Optional: Cloudflare Access in front of the operator console (munaxa-platform
+ * `infra/aws/cloudflare-access.md`). Not used by the AWS-native default (`OPERATOR-ACCESS.md`),
+ * where this verifier is not constructed and Identity MFA plus the allow-list stand alone.
  *
  * Access signs a JWT for every request it lets through and sends it in `Cf-Access-Jwt-Assertion`.
  * The portal forwards that header with each call it makes here, so an operator route can require

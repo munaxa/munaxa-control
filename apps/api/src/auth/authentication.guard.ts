@@ -36,9 +36,10 @@ import { parseServiceToken, secretMatches } from './service-credentials';
  *    route reads only an Identity access token; a service route reads only a service credential.
  *    A controller that declares neither is refused outright, so a forgotten decorator is a 403
  *    rather than an open door.
- * 3. When Cloudflare Access is configured (always, in production), an operator route first needs
- *    the Access token the portal forwards: signed by the team's keys, for this application, and
- *    naming a person. A request that went round Access has none.
+ * 3. When the optional Cloudflare Access layer is configured, an operator route first needs the
+ *    Access token the portal forwards: signed by the team's keys, for this application, and
+ *    naming a person. A request that went round Access has none. Without it, production requires
+ *    Identity MFA and the subject allow-list below (config/environment.ts).
  * 4. An operator token is verified against Identity's public keys — signature, expiry, issuer,
  *    audience — must belong to Munaxa Group's own organisation and to an Identity session, must
  *    satisfy MFA when required and name a subject on the allow-list when one is set (ADR-0006),

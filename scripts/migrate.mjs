@@ -11,18 +11,13 @@ if (!url) {
   console.error('DATABASE_MIGRATION_URL (the schema owner) is not set.');
   process.exit(1);
 }
+// The Prisma CLI by its own path, not through `pnpm exec`: the migrate image carries no package
+// manager (Dockerfile; pnpm 10.33.0 had HIGH advisories in the 20 Nov 2026 image scan), and the
+// command is the one `pnpm --filter @control/api exec` resolved to, run from the same directory.
+const api = resolve(root, 'apps/api');
 execFileSync(
-  'pnpm',
-  [
-    '--filter',
-    '@control/api',
-    'exec',
-    'prisma',
-    'migrate',
-    'deploy',
-    '--schema',
-    '../../prisma/schema.prisma',
-  ],
-  { cwd: root, stdio: 'inherit', env: { ...process.env, DATABASE_URL: url } },
+  resolve(api, 'node_modules/.bin/prisma'),
+  ['migrate', 'deploy', '--schema', '../../prisma/schema.prisma'],
+  { cwd: api, stdio: 'inherit', env: { ...process.env, DATABASE_URL: url } },
 );
 execFileSync('node', [resolve(root, 'scripts/apply-grants.mjs')], { stdio: 'inherit' });

@@ -47,25 +47,22 @@ jobs:
       TEST_DATABASE_URL: postgresql://control_app@localhost:5432/control
       TEST_DATABASE_MIGRATION_URL: postgresql://control_owner@localhost:5432/control
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           registry-url: 'https://npm.pkg.github.com'
           scope: '@munaxa'
 
-      # `@munaxa/*` is published from munaxa-platform to GitHub Packages. This run's own
-      # GITHUB_TOKEN (packages: read above) reads it because each package grants this repository
-      # read access. No long-lived package token: a repository secret is readable by any workflow
-      # pushed to any branch. A 403 here is fixed in the package's "Manage Actions access".
+      # `@munaxa/*` is published from munaxa-platform to GitHub Packages. This repository's
+      # per-run GITHUB_TOKEN reads it once the packages grant this repository Actions access; no
+      # long-lived token is used (a branch author's workflow could read a repository secret).
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
@@ -121,17 +118,48 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
       # Built, not pushed: publishing an image is a release step that needs its own authorisation.
+      #
+      # NODE_AUTH_TOKEN must be on THIS step: `--secret id=node_auth_token,env=NODE_AUTH_TOKEN` reads
+      # the variable from the step's environment, and without it BuildKit mounts an empty secret, so
+      # the install inside the build reaches GitHub Packages with no token and gets HTTP 401 for
+      # @munaxa/auth (run 44792718241, 20 Nov 2026). The verify job installs with the same
+      # expression and passes, which is what places the fault here and not in a package grant.
       - name: Build api, migrate and portal
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::no package token reached this step (GITHUB_TOKEN)"; exit 1
+          fi
           for target in api migrate portal; do
             docker buildx build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
               --target "$target" -t "munaxa-control-$target:ci" --load .
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify the images (Alpine, zlib, packages, loaded libraries, Prisma engine, not root)
+        run: |
+          set -euo pipefail
+          for target in api migrate portal; do
+            .github/scripts/verify-image.sh "munaxa-control-$target:ci" "$target"
+          done
+      # A vulnerability scan of the images just built (OS and npm packages), failing on HIGH or
+      # CRITICAL. This is CI's own scan; ECR's scan of a published digest is separate evidence.
+      - name: Scan the images (SBOM, HIGH and CRITICAL fail)
+        run: |
+          set -euo pipefail
+          status=0
+          for target in api migrate portal; do
+            .github/scripts/scan-image.sh "munaxa-control-$target:ci" "control-$target" image-reports || status=1
+          done
+          exit $status
+      - name: Keep the SBOMs and scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-reports
+          path: image-reports/
+          if-no-files-found: warn
+          retention-days: 90

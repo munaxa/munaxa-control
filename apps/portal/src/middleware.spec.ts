@@ -62,8 +62,16 @@ describe('middleware', () => {
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it('fails closed in production when Access is not configured', async () => {
+  it('without Access (optional), goes straight to the Munaxa Identity session check', async () => {
     vi.stubEnv('OPERATOR_ACCESS_TEAM_DOMAIN', '');
+    vi.stubEnv('OPERATOR_ACCESS_AUDIENCE', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    const response = await middleware(request('/customers'));
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/api/auth/login?returnTo=%2Fcustomers');
+  });
+
+  it('fails closed when Access is half configured', async () => {
     vi.stubEnv('OPERATOR_ACCESS_AUDIENCE', '');
     vi.stubEnv('NODE_ENV', 'production');
     const response = await middleware(request('/'));

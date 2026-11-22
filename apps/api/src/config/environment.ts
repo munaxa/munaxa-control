@@ -58,10 +58,15 @@ const schema = z.object({
    */
   OPERATOR_SUBJECT_ALLOWLIST: z.string().default(''),
   /**
-   * Cloudflare Access in front of the operator console: the team domain
-   * (`https://<team>.cloudflareaccess.com`) and the Access application's AUD tag. With both set,
-   * every operator route also requires the Access token the portal forwards
-   * (`auth/cloudflare-access.ts`). Required in production; both or neither elsewhere.
+   * Optional: Cloudflare Access in front of the operator console, as an extra layer. The team
+   * domain (`https://<team>.cloudflareaccess.com`) and the Access application's AUD tag; both or
+   * neither. With both set, every operator route also requires the Access token the portal
+   * forwards (`auth/cloudflare-access.ts`).
+   *
+   * Without it (the AWS-native default, munaxa-platform `infra/aws/OPERATOR-ACCESS.md`), the
+   * operator console relies on Munaxa Identity alone at the application layer, and production then
+   * requires both `OPERATOR_REQUIRE_MFA=true` and a non-empty `OPERATOR_SUBJECT_ALLOWLIST`. The
+   * network restriction in front of the console is the load balancer's (operator source ranges).
    */
   OPERATOR_ACCESS_TEAM_DOMAIN: z.string().optional(),
   OPERATOR_ACCESS_AUDIENCE: z.string().optional(),
@@ -122,7 +127,7 @@ export interface Environment extends RawEnvironment {
   readonly operatorPublicKeys: readonly PublicKey[];
   /** `OPERATOR_SUBJECT_ALLOWLIST`, parsed. Empty means no allow-list is configured. */
   readonly operatorSubjects: ReadonlySet<string>;
-  /** Cloudflare Access, when configured; null only outside production. */
+  /** Cloudflare Access, when configured (optional); null when it is not. */
   readonly operatorAccess: { readonly teamDomain: string; readonly audience: string } | null;
   /** The `FILE` backend's private key; null with `KMS`, whose key never enters this process. */
   readonly licencePrivateKey: string | null;
@@ -226,10 +231,19 @@ export function loadEnvironment(
   const accessAudience = raw.OPERATOR_ACCESS_AUDIENCE?.trim() || undefined;
   let operatorAccess: Environment['operatorAccess'] = null;
   if (teamDomain === undefined && accessAudience === undefined) {
+    // No Cloudflare Access: Identity is the only sign-in in front of the operator routes, so in
+    // production it must prove a second factor and the person must be named in this deployment.
     if (raw.NODE_ENV === 'production') {
-      issues.push(
-        'OPERATOR_ACCESS_TEAM_DOMAIN, OPERATOR_ACCESS_AUDIENCE: required in production (Cloudflare Access).',
-      );
+      if (!raw.OPERATOR_REQUIRE_MFA) {
+        issues.push(
+          'OPERATOR_REQUIRE_MFA: must be true in production without Cloudflare Access (OPERATOR_ACCESS_*).',
+        );
+      }
+      if (operatorSubjects.length === 0) {
+        issues.push(
+          'OPERATOR_SUBJECT_ALLOWLIST: required in production without Cloudflare Access (OPERATOR_ACCESS_*).',
+        );
+      }
     }
   } else if (teamDomain === undefined || accessAudience === undefined) {
     issues.push('OPERATOR_ACCESS_TEAM_DOMAIN, OPERATOR_ACCESS_AUDIENCE: set both or neither.');

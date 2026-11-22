@@ -37,8 +37,11 @@ ARG NODE_IMAGE=node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa53
 FROM scratch AS vendor
 
 FROM ${NODE_IMAGE} AS os
-# OpenSSL for Prisma's query engine, which otherwise guesses the library version and may not load;
-# Prisma generates the linux-musl-openssl-3.0.x engine because `prisma generate` runs on this base.
+# Prisma's query engine needs libssl.so.3/libcrypto.so.3 (the libssl3 and libcrypto3 packages); Prisma
+# detects the library from /usr/lib first and generates the linux-musl-openssl-3.0.x engine because
+# `prisma generate` runs on this base. The `openssl` command-line tool is not installed: nothing runs
+# it, and verify-image.sh proves the engine loads against the libraries alone (as control#13 does;
+# D-SSL, 22 Nov 2026: one package less carrying the OpenSSL 3.5.9-r1 findings).
 # zlib 1.4-r0 for CVE-2026-4738 (the pinned image ships 1.3.2-r1), exactly as Identity does.
 # OpenSSL is raised to 3.5.9-r1 on the same terms: the pinned image ships libssl3 and libcrypto3
 # 3.5.9-r0, which the CI image scan of 20 Nov 2026 (Grype) reports with 4 HIGH findings
@@ -47,8 +50,8 @@ FROM ${NODE_IMAGE} AS os
 # Alpine replaces any of them.
 # The split is the point: `apk list -I <name>` prints `<name>-<version> <arch> ...` and $1 is the first word.
 # hadolint ignore=SC2046
-RUN apk add --no-cache ca-certificates 'openssl=3.5.9-r1' 'zlib=1.4-r0' 'libssl3=3.5.9-r1' 'libcrypto3=3.5.9-r1' && \
-    for want in zlib=1.4-r0 libssl3=3.5.9-r1 libcrypto3=3.5.9-r1 openssl=3.5.9-r1; do \
+RUN apk add --no-cache ca-certificates 'zlib=1.4-r0' 'libssl3=3.5.9-r1' 'libcrypto3=3.5.9-r1' && \
+    for want in zlib=1.4-r0 libssl3=3.5.9-r1 libcrypto3=3.5.9-r1; do \
       name="${want%%=*}" && set -- $(apk list -I "$name" 2>/dev/null) && installed="${1#"$name"-}" && \
       if [ "$installed" != "${want#*=}" ]; then \
         echo "$name is '$installed', expected ${want#*=}" >&2; exit 1; \

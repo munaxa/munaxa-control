@@ -17,7 +17,7 @@ function accessVerifier(): AccessVerifier | null | string {
 }
 
 /**
- * Cloudflare Access first: without its token (a request that went round Access, straight to the
+ * Cloudflare Access first, when it is configured (optional): without its token (a request that went round Access, straight to the
  * load balancer), nothing here answers, not a page, not a script, not a server action. Then: no
  * session, no console: straight to Munaxa Identity's sign-in, returning here afterwards. The
  * session check is navigation only (the API authenticates every request itself) and never

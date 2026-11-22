@@ -7,14 +7,14 @@ only. Never production. Not a permanent suppression. Work and School are not cov
 
 ## What is accepted, exactly
 
-| | |
-| --- | --- |
-| CVEs | CVE-2026-107493, CVE-2026-107494, CVE-2026-121482, CVE-2026-124709, CVE-2026-84786 |
-| Packages | `libssl3` and `libcrypto3`, version `3.5.9-r1`, type `apk` (10 exact combinations) |
-| Images (scan names) | `control-api`, `control-migrate`, `control-portal`. |
-| Workflows | `ci.yml`, `publish-images.yml` |
-| Environment | `testing` (any other value is refused) |
-| Expiry | **2026-12-01T00:00:00Z**, hard-coded in `scan-exception.py` as well as in the JSON |
+|                     |                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| CVEs                | CVE-2026-107493, CVE-2026-107494, CVE-2026-121482, CVE-2026-124709, CVE-2026-84786 |
+| Packages            | `libssl3` and `libcrypto3`, version `3.5.9-r1`, type `apk` (10 exact combinations) |
+| Images (scan names) | `control-api`, `control-migrate`, `control-portal`.                                |
+| Workflows           | `ci.yml`, `publish-images.yml`                                                     |
+| Environment         | `testing` (any other value is refused)                                             |
+| Expiry              | **2026-12-01T00:00:00Z**, hard-coded in `scan-exception.py` as well as in the JSON |
 
 Source of the list: the Grype scans of 21 Nov 2026 (e.g. munaxa-docs run 44900058536, Grype DB built
 2026-11-21T06:20:06Z); re-confirmed by the CI run of the pull request that added this file.

@@ -15,9 +15,15 @@ if (!url) {
 // manager (Dockerfile; pnpm 10.33.0 had HIGH advisories in the 20 Nov 2026 image scan), and the
 // command is the one `pnpm --filter @control/api exec` resolved to, run from the same directory.
 const api = resolve(root, 'apps/api');
-execFileSync(
-  resolve(api, 'node_modules/.bin/prisma'),
-  ['migrate', 'deploy', '--schema', '../../prisma/schema.prisma'],
-  { cwd: api, stdio: 'inherit', env: { ...process.env, DATABASE_URL: url } },
-);
-execFileSync('node', [resolve(root, 'scripts/apply-grants.mjs')], { stdio: 'inherit' });
+try {
+  execFileSync(
+    resolve(api, 'node_modules/.bin/prisma'),
+    ['migrate', 'deploy', '--schema', '../../prisma/schema.prisma'],
+    { cwd: api, stdio: 'inherit', env: { ...process.env, DATABASE_URL: url } },
+  );
+  execFileSync(process.execPath, [resolve(root, 'scripts/apply-grants.mjs')], { stdio: 'inherit' });
+} catch (e) {
+  // A code only, never the error object (it carries the child's arguments and options).
+  console.error(`migrate failed (${e && e.code ? e.code : `exit ${e && e.status}`})`);
+  process.exit(1);
+}

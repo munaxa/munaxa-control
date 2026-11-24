@@ -41,9 +41,9 @@ const verifier = (fetchKeys = published, now = () => NOW) =>
   new AccessVerifier({ teamDomain: TEAM, audience: AUD }, fetchKeys, now);
 
 describe('accessConfigFrom', () => {
-  it('is off outside production without settings, and refuses production without them', () => {
+  it('is off without settings, in production too (the API then enforces Identity MFA)', () => {
     expect(accessConfigFrom({ NODE_ENV: 'development' })).toBeNull();
-    expect(accessConfigFrom({ NODE_ENV: 'production' })).toMatch(/not configured/);
+    expect(accessConfigFrom({ NODE_ENV: 'production' })).toBeNull();
   });
 
   it('needs both settings, a team domain and an AUD tag', () => {

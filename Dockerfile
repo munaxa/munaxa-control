@@ -40,7 +40,8 @@ FROM ${NODE_IMAGE} AS os
 # Prisma's query engine needs libssl.so.3/libcrypto.so.3 (the libssl3 and libcrypto3 packages); Prisma
 # detects the library from /usr/lib first and generates the linux-musl-openssl-3.0.x engine because
 # `prisma generate` runs on this base. The `openssl` command-line tool is not installed: nothing runs
-# it, and verify-image.sh proves the engine loads against the libraries alone (D-SSL, 21 Nov 2026).
+# it, and verify-image.sh proves the engine loads against the libraries alone (as control#13 does;
+# D-SSL, 22 Nov 2026: one package less carrying the OpenSSL 3.5.9-r1 findings).
 # zlib 1.4-r0 for CVE-2026-4738 (the pinned image ships 1.3.2-r1), exactly as Identity does.
 # OpenSSL is raised to 3.5.9-r1 on the same terms: the pinned image ships libssl3 and libcrypto3
 # 3.5.9-r0, which the CI image scan of 20 Nov 2026 (Grype) reports with 4 HIGH findings

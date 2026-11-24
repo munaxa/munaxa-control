@@ -145,11 +145,14 @@ jobs:
           set -euo pipefail
           REF="$REGISTRY/munaxa-control/$TARGET:sha-$SHA"
           .github/scripts/verify-image.sh "$REF" "$TARGET"
-          .github/scripts/scan-image.sh "$REF" "control-$TARGET" image-reports
+          # Permanent gate first; only if it fails, the TEMPORARY Testing-only D-SSL exception (expires
+          # 2026-12-01T00:00:00Z). An image accepted this way is Testing-only: the platform stack refuses
+          # every product image in production while the exception exists (infra/aws/stack/dssl-exception.tf).
+          .github/scripts/scan-image-testing.sh "$REF" "control-$TARGET" image-reports testing
 
       - name: Keep the SBOM and scan report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: image-reports-${{ matrix.target }}
           path: image-reports/

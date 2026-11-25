@@ -20,6 +20,7 @@ import { RateLimitGuard, RateLimiter } from './core/rate-limit';
 import { RequestIdMiddleware } from './core/request-id.middleware';
 import { CustomersController } from './customers/customers.controller';
 import { CustomersService } from './customers/customers.service';
+import { TenantSightingsService } from './customers/tenant-sightings.service';
 import { EntitlementsService } from './entitlements/entitlements.service';
 import { ProductsController } from './entitlements/products.controller';
 import { HealthController } from './health/health.controller';
@@ -90,6 +91,7 @@ export class AppModule implements NestModule {
         PrismaService,
         AuditService,
         CustomersService,
+        TenantSightingsService,
         CatalogueService,
         SubscriptionsService,
         LicensingService,

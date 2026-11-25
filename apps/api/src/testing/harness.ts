@@ -182,7 +182,7 @@ export async function startHarness(
     accessToken,
     reset: async () => {
       await owner.$executeRawUnsafe(
-        'TRUNCATE audit_event, usage_report, licence, installation, subscription_event, subscription, plan_version, plan, tenant_link, service_credential, product_deployment, customer, idempotency_record RESTART IDENTITY CASCADE',
+        'TRUNCATE audit_event, usage_report, tenant_sighting, licence, installation, subscription_event, subscription, plan_version, plan, tenant_link, service_credential, product_deployment, customer, idempotency_record RESTART IDENTITY CASCADE',
       );
       clock.set(new Date('2026-11-01T09:00:00.000Z'));
     },

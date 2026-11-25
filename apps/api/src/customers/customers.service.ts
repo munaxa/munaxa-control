@@ -7,6 +7,7 @@ import { conflict, invalid, notFound } from '../core/errors';
 import { newId } from '../core/ids';
 import { PrismaService } from '../core/prisma.service';
 import type { Product } from '../core/products';
+import { TenantSightingsService } from './tenant-sightings.service';
 
 export interface CustomerInput {
   readonly name: string;
@@ -29,6 +30,7 @@ export class CustomersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(TenantSightingsService) private readonly sightings: TenantSightingsService,
   ) {}
 
   list(query: {
@@ -149,7 +151,42 @@ export class CustomersService {
     });
   }
 
-  linkTenant(principal: Principal, customerId: string, input: TenantInput, requestId?: string) {
+  /**
+   * Link a tenant the product reported. Its product, identifier and deployment are the sighting's —
+   * what the deployment's own credential asked about — so nothing about the tenant is typed. The
+   * display name defaults to the product's label for it, then to the identifier.
+   */
+  async linkSightedTenant(
+    principal: Principal,
+    customerId: string,
+    sightingId: string,
+    displayName: string | undefined,
+    requestId?: string,
+  ) {
+    const sighting = await this.sightings.unlinkedById(sightingId);
+    if (sighting === null) throw notFound('An unlinked tenant with that sighting');
+    return this.linkTenant(
+      principal,
+      customerId,
+      {
+        product: sighting.product as Product,
+        tenantRef: sighting.tenantRef,
+        deploymentType: 'SAAS',
+        deploymentId: sighting.deploymentId,
+        displayName: displayName ?? sighting.label ?? sighting.tenantRef,
+      },
+      requestId,
+      sighting.id,
+    );
+  }
+
+  linkTenant(
+    principal: Principal,
+    customerId: string,
+    input: TenantInput,
+    requestId?: string,
+    sightingId?: string,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       const customer = await tx.customer.findUnique({ where: { id: customerId } });
       if (customer === null) throw notFound('The customer');
@@ -192,7 +229,12 @@ export class CustomersService {
           customerId,
           tenantLinkId: tenant.id,
           product: tenant.product,
-          payload: { tenantRef: tenant.tenantRef, deploymentType: tenant.deploymentType },
+          payload: {
+            tenantRef: tenant.tenantRef,
+            deploymentType: tenant.deploymentType,
+            source: sightingId === undefined ? 'ENTERED' : 'SIGHTING',
+            ...(sightingId !== undefined && { sightingId }),
+          },
         },
         requestId,
       );

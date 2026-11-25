@@ -34,8 +34,11 @@ subscription grants nothing beyond what each product keeps ungated (its core mod
 
    Docs also needs the host on `OUTBOUND_HTTP_ALLOWLIST`: its outbound port refuses anything else.
 
-4. **Per tenant:** Portal → Customers → link the product's tenant identifier to the customer as a
-   `SaaS` tenant on that deployment, then start a subscription on a published plan version.
+4. **Per tenant:** Portal → Customers → link the tenant to the customer, then start a subscription
+   on a published plan version. A SaaS tenant does not need its identifier copied: once the product
+   has checked the tenant's licence (which it does as soon as the organisation is used), it is listed
+   under **Link a product tenant** with the product's name for it, and is picked from there. Typing
+   the identifier remains for on-premises tenants and tenants not reported yet.
 
 A credential is bound to one deployment of one product. It can read only tenants linked to that
 deployment and report usage only for them; asking about any other tenant answers `404`, exactly as

@@ -735,6 +735,148 @@ describe('usage reporting', () => {
   });
 });
 
+describe('tenants a product reports before anyone links them', () => {
+  const NEW_TENANT = 'd75d9645-d2da-48c3-af91-ab6f36e789a8';
+
+  type Sighting = {
+    id: string;
+    product: string;
+    tenantRef: string;
+    label: string | null;
+    deployment: { id: string; name: string };
+  };
+  const sightings = async (query = '') =>
+    (await h.http.get(`/api/v1/admin/tenant-sightings${query}`).set(admin()).expect(200))
+      .body as Sighting[];
+  /** Recording is not awaited by the answer, so a test waits for the row it expects. */
+  const until = async <T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> => {
+    for (let i = 0; i < 50; i++) {
+      const value = await read();
+      if (done(value)) return value;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return read();
+  };
+
+  it('records an unlinked tenant its deployment asks about, with the product’s label, and still answers 404', async () => {
+    const w = await world();
+    await h.http
+      .get(entitlementsPath('docs', NEW_TENANT))
+      .set({ ...auth(w.credential.token), 'Munaxa-Tenant-Label': '  munaxa-\tinternal  ' })
+      .expect(404);
+    const listed = await until(sightings, (l) => l.length === 1);
+    expect(listed).toEqual([
+      expect.objectContaining({
+        product: 'docs',
+        tenantRef: NEW_TENANT,
+        label: 'munaxa- internal',
+        deployment: expect.objectContaining({ id: w.deployment.id, name: 'docs-eu-prod' }),
+      }),
+    ]);
+    // Asked again: one row, not two.
+    await h.http
+      .get(entitlementsPath('docs', NEW_TENANT))
+      .set(auth(w.credential.token))
+      .expect(404);
+    expect(await h.owner.tenantSighting.count()).toBe(1);
+    // A linked tenant, another product’s path and another deployment’s tenant are not sightings.
+    await h.http
+      .get(entitlementsPath('docs', '019489f0-0000-7000-8000-0000000000a1'))
+      .set(auth(w.credential.token))
+      .expect(404);
+    await h.http.get(entitlementsPath('school', 'x-1')).set(auth(w.credential.token)).expect(404);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await h.owner.tenantSighting.count()).toBe(1);
+    expect(await sightings('?product=school')).toEqual([]);
+  });
+
+  it('links a reported tenant without typing its identifier, then stops listing it and serves it', async () => {
+    const w = await world();
+    await h.http
+      .get(entitlementsPath('docs', NEW_TENANT))
+      .set({ ...auth(w.credential.token), 'Munaxa-Tenant-Label': 'munaxa-internal' })
+      .expect(404);
+    const [sighting] = await until(sightings, (l) => l.length === 1);
+    const linked = await post<{
+      id: string;
+      tenantRef: string;
+      deploymentId: string;
+      displayName: string;
+    }>(`/admin/customers/${w.customer.id}/tenants`, { sightingId: sighting?.id });
+    expect(linked).toMatchObject({
+      tenantRef: NEW_TENANT,
+      deploymentId: w.deployment.id,
+      displayName: 'munaxa-internal',
+    });
+    expect(await sightings()).toEqual([]);
+    // The same sighting cannot be linked twice, to this customer or another.
+    await post(
+      `/admin/customers/${w.customer.id}/tenants`,
+      { sightingId: sighting?.id },
+      admin(),
+      404,
+    );
+    const audit = await h.owner.auditEvent.findFirst({
+      where: { action: 'licensing.customer.tenant_linked', tenantLinkId: linked.id },
+    });
+    expect(audit?.payload).toMatchObject({ source: 'SIGHTING', sightingId: sighting?.id });
+
+    await post('/admin/subscriptions', {
+      tenantLinkId: linked.id,
+      planVersionId: w.version.id,
+      start: 'ACTIVE',
+    });
+    await h.http
+      .get(entitlementsPath('docs', NEW_TENANT))
+      .set(auth(w.credential.token))
+      .expect(200);
+  });
+
+  it('cannot be mixed with typed tenant fields, and needs the write permission', async () => {
+    const w = await world();
+    await h.http
+      .get(entitlementsPath('docs', NEW_TENANT))
+      .set(auth(w.credential.token))
+      .expect(404);
+    const [sighting] = await until(sightings, (l) => l.length === 1);
+    await post(
+      `/admin/customers/${w.customer.id}/tenants`,
+      { sightingId: sighting?.id, tenantRef: 'something-else', product: 'docs' },
+      admin(),
+      422,
+    );
+    await post(
+      `/admin/customers/${w.customer.id}/tenants`,
+      { sightingId: sighting?.id },
+      auth(h.token([ControlPermission.CUSTOMERS_READ])),
+      403,
+    );
+    await h.http.get('/api/v1/admin/tenant-sightings').set(auth(w.credential.token)).expect(401);
+  });
+
+  it('a credential cannot grow the list without bound', async () => {
+    const w = await world();
+    const { MAX_UNLINKED_SIGHTINGS_PER_DEPLOYMENT: cap } =
+      await import('./customers/tenant-sightings.service');
+    await h.owner.tenantSighting.createMany({
+      data: Array.from({ length: cap }, (_, i) => ({
+        id: randomUUID(),
+        product: 'docs',
+        deploymentId: w.deployment.id,
+        tenantRef: `made-up-${String(i)}`,
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+      })),
+    });
+    await h.http
+      .get(entitlementsPath('docs', NEW_TENANT))
+      .set(auth(w.credential.token))
+      .expect(404);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(await h.owner.tenantSighting.count({ where: { tenantRef: NEW_TENANT } })).toBe(0);
+  });
+});
+
 describe('the audit trail', () => {
   it('records every privileged action and cannot be rewritten by the runtime role', async () => {
     await world();

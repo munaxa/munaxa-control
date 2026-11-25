@@ -118,6 +118,13 @@ Operator permissions (seeded into Identity from `artifacts/control-permissions.j
   linked to another deployment, or to another product, reads exactly like one that does not exist.
 - `Cache-Control: private, max-age=ENTITLEMENT_CACHE_SECONDS` and a strong `ETag`; send
   `If-None-Match` to get `304`.
+- Optional request header `Munaxa-Tenant-Label`: the product's own name for the tenant (Docs sends
+  the organisation's slug). Used only when the tenant is linked to **no** customer: the question is
+  then recorded as a _tenant sighting_ (deployment, identifier, label, first and last seen) so an
+  operator can pick the tenant from a list when linking it. The answer is the same `404` either way,
+  and recording is not awaited, so it cannot change or delay it. Control characters are stripped and
+  the label is cut to 100 characters; it is shown as text and decides nothing. At most 200 unlinked
+  sightings are kept per deployment, so a leaked credential cannot grow the list without bound.
 
 ### `POST /products/{product}/usage`
 
@@ -146,14 +153,15 @@ Lists accept the paging parameters above. Every change is audited in the same tr
 
 ### Customers and tenants
 
-| Route                                | Permission      | Body / query                                                                                                  |
-| ------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------- |
-| `GET /admin/customers`               | customers:read  | `search`, `status` (`ACTIVE`/`CLOSED`)                                                                        |
-| `POST /admin/customers`              | customers:write | `name`, `legalName?`, `country?` (ISO alpha-2), `contactEmail?`                                               |
-| `GET /admin/customers/{id}`          | customers:read  | — with its tenants, each with its deployment, subscriptions and installations                                 |
-| `PATCH /admin/customers/{id}`        | customers:write | `expectedVersion`, any of the create fields, `status?`. Closing never deletes anything                        |
-| `POST /admin/customers/{id}/tenants` | customers:write | `product`, `tenantRef`, `deploymentType` (`SAAS` needs `deploymentId`; `ON_PREMISES` has none), `displayName` |
-| `GET /admin/tenants`                 | customers:read  | `product`, `search`                                                                                           |
+| Route                                | Permission      | Body / query                                                                                                                                                                                                                            |
+| ------------------------------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /admin/customers`               | customers:read  | `search`, `status` (`ACTIVE`/`CLOSED`)                                                                                                                                                                                                  |
+| `POST /admin/customers`              | customers:write | `name`, `legalName?`, `country?` (ISO alpha-2), `contactEmail?`                                                                                                                                                                         |
+| `GET /admin/customers/{id}`          | customers:read  | — with its tenants, each with its deployment, subscriptions and installations                                                                                                                                                           |
+| `PATCH /admin/customers/{id}`        | customers:write | `expectedVersion`, any of the create fields, `status?`. Closing never deletes anything                                                                                                                                                  |
+| `POST /admin/customers/{id}/tenants` | customers:write | `product`, `tenantRef`, `deploymentType` (`SAAS` needs `deploymentId`; `ON_PREMISES` has none), `displayName` — **or** `sightingId` and an optional `displayName`, which takes the product, identifier and deployment from the sighting |
+| `GET /admin/tenant-sightings`        | customers:read  | `product` — tenants a deployment asked about that no customer holds yet, most recently seen first                                                                                                                                       |
+| `GET /admin/tenants`                 | customers:read  | `product`, `search`                                                                                                                                                                                                                     |
 
 ### Catalogue
 

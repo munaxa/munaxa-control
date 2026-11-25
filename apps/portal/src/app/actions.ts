@@ -104,6 +104,20 @@ export const setCustomerStatus = action(async (data, key) => {
 
 export const linkTenant = action(async (data, key) => {
   const customerId = required(data, 'customerId');
+  const sightingId = formString(data, 'sightingId');
+  // A tenant the product reported: the API takes its product, identifier and deployment from what
+  // the product sent, so the form sends only which one and, optionally, a display name.
+  if (sightingId !== undefined) {
+    const displayName = formString(data, 'displayName');
+    await apiSend(
+      'POST',
+      `/admin/customers/${customerId}/tenants`,
+      { sightingId, ...(displayName !== undefined && { displayName }) },
+      key,
+    );
+    revalidatePath(`/customers/${customerId}`);
+    return { message: 'Tenant linked.' };
+  }
   const deploymentType = required(data, 'deploymentType');
   await apiSend(
     'POST',

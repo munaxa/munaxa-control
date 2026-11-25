@@ -8,6 +8,7 @@ import { ENVIRONMENT, type Environment } from '../config/environment';
 import { isoDate } from '../core/http';
 import { keySchema, productSchema } from '../core/products';
 import { ZodPipe } from '../core/validation';
+import { TENANT_LABEL_HEADER, cleanLabel } from '../customers/tenant-sightings.service';
 import { UsageService } from '../usage/usage.service';
 import { EntitlementsService } from './entitlements.service';
 
@@ -50,9 +51,17 @@ export class ProductsController {
     @Param('product', new ZodPipe(productSchema)) product: string,
     @Param('tenantId', new ZodPipe(tenantRef)) tenantId: string,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Headers(TENANT_LABEL_HEADER) label: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const { snapshot, etag } = await this.entitlements.resolve(service, product, tenantId);
+    // `Munaxa-Tenant-Label`: optional, the product's own name for the tenant (its organisation's
+    // slug). Kept only for a tenant no operator has linked yet, so the portal can show it.
+    const { snapshot, etag } = await this.entitlements.resolve(
+      service,
+      product,
+      tenantId,
+      cleanLabel(label),
+    );
     // `private`: an entitlement answer is about one customer and must never sit in a shared cache.
     response.setHeader(
       'Cache-Control',

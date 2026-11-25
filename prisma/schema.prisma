@@ -46,6 +46,7 @@ model ProductDeployment {
 
   credentials ServiceCredential[]
   tenants     TenantLink[]
+  sightings   TenantSighting[]
 
   @@unique([product, name], map: "uq_deployment_product_name")
   @@map("product_deployment")
@@ -93,6 +94,26 @@ model TenantLink {
   @@unique([product, tenantRef], map: "uq_tenant_product_ref")
   @@index([customerId], map: "ix_tenant_customer")
   @@map("tenant_link")
+}
+
+/// A product tenant a deployment asked about before any operator linked it — what the portal offers
+/// when linking a tenant, so its identifier is picked rather than copied by hand. Grants nothing:
+/// a deployment is still only ever told about tenants linked to it.
+model TenantSighting {
+  id           String   @id @db.Uuid
+  product      String
+  deploymentId String   @map("deployment_id") @db.Uuid
+  tenantRef    String   @map("tenant_ref")
+  /// What the product says the tenant is called. Informational; never trusted for anything.
+  label        String?
+  firstSeenAt  DateTime @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt   DateTime @map("last_seen_at") @db.Timestamptz(6)
+
+  deployment ProductDeployment @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@unique([deploymentId, tenantRef], map: "uq_sighting_deployment_ref")
+  @@index([product, tenantRef], map: "ix_sighting_product_ref")
+  @@map("tenant_sighting")
 }
 
 /// A product's sellable package — "Docs Business". The terms live in its versions.

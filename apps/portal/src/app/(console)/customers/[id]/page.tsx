@@ -25,7 +25,7 @@ import { ActionForm } from '@/components/action-form';
 import { StatusBadge } from '@/components/status-badge';
 import { apiGet } from '@/lib/api';
 import { formatDate, formatDateTime, productName } from '@/lib/format';
-import type { CustomerDetail, Deployment, Plan } from '@/lib/types';
+import type { CustomerDetail, Deployment, Plan, TenantSighting } from '@/lib/types';
 
 import {
   createSubscription,
@@ -42,10 +42,11 @@ export default async function CustomerPage({
   params: Promise<{ id: string }>;
 }): Promise<ReactNode> {
   const { id } = await params;
-  const [customer, deployments, plans] = await Promise.all([
+  const [customer, deployments, plans, sightings] = await Promise.all([
     apiGet<CustomerDetail>(`/admin/customers/${id}`, `/customers/${id}`),
     apiGet<Deployment[]>('/admin/deployments'),
     apiGet<Plan[]>('/admin/plans'),
+    apiGet<TenantSighting[]>('/admin/tenant-sightings'),
   ]);
   const sellable = plans.flatMap((p) =>
     p.versions
@@ -203,8 +204,45 @@ export default async function CustomerPage({
           <CardHeader>
             <CardTitle>Link a product tenant</CardTitle>
             <CardDescription>
-              The tenant identifier is the product&apos;s own; copy it from the product, never
-              invent one.
+              {sightings.length > 0
+                ? 'Pick the organisation from the list: these are the tenants your product deployments have reported that no customer holds yet. The identifier is filled in for you.'
+                : 'No unlinked tenants have been reported yet. A SaaS organisation appears here automatically once its product first checks its licence.'}
+            </CardDescription>
+          </CardHeader>
+          {sightings.length > 0 && (
+            <CardContent>
+              <ActionForm action={linkTenant} submitLabel="Link selected tenant">
+                <input type="hidden" name="customerId" value={customer.id} />
+                <Field label="Reported tenant" htmlFor="sightingId" required>
+                  <Select id="sightingId" name="sightingId" required>
+                    {sightings.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {productName(s.product)} — {s.label ?? 'unnamed'} · {s.tenantRef} ·{' '}
+                        {s.deployment.name} · last seen {formatDateTime(s.lastSeenAt)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Display name"
+                  htmlFor="sightedDisplayName"
+                  hint="Optional. Leave empty to use the name the product reported."
+                >
+                  <Input id="sightedDisplayName" name="displayName" maxLength={200} />
+                </Field>
+              </ActionForm>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {customer.status === 'ACTIVE' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Link a tenant by its identifier</CardTitle>
+            <CardDescription>
+              For an on-premises installation, or a tenant that has not been reported yet. The
+              identifier is the product&apos;s own; copy it from the product, never invent one.
             </CardDescription>
           </CardHeader>
           <CardContent>

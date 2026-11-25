@@ -11,7 +11,7 @@ GRANT USAGE ON SCHEMA public TO control_app;
 
 GRANT SELECT, INSERT, UPDATE ON
   customer, product_deployment, service_credential, tenant_link, plan, plan_version,
-  subscription, installation, licence
+  subscription, installation, licence, tenant_sighting
 TO control_app;
 
 GRANT SELECT, INSERT ON subscription_event, usage_report, audit_event TO control_app;
@@ -25,5 +25,5 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO control_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON subscription_event, usage_report, audit_event FROM control_app;
 REVOKE DELETE, TRUNCATE ON
   customer, product_deployment, service_credential, tenant_link, plan, plan_version,
-  subscription, installation, licence
+  subscription, installation, licence, tenant_sighting
 FROM control_app;

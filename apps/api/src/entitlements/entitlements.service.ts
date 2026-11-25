@@ -7,6 +7,7 @@ import type { ServicePrincipal } from '../auth/principal';
 import { CLOCK, type Clock } from '../core/clock';
 import { notFound } from '../core/errors';
 import { PrismaService } from '../core/prisma.service';
+import { TenantSightingsService } from '../customers/tenant-sightings.service';
 import { snapshotOf } from './snapshot';
 
 /**
@@ -23,17 +24,30 @@ export class EntitlementsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(TenantSightingsService) private readonly sightings: TenantSightingsService,
   ) {}
 
   async resolve(
     principal: ServicePrincipal,
     product: string,
     tenantRef: string,
+    label: string | null = null,
   ): Promise<{ snapshot: EntitlementSnapshot; etag: string }> {
     if (product !== principal.product) throw notFound('The tenant');
-    const tenant = await this.prisma.tenantLink.findFirst({
-      where: { product, tenantRef, deploymentType: 'SAAS', deploymentId: principal.deploymentId },
+    const linked = await this.prisma.tenantLink.findUnique({
+      where: { product_tenantRef: { product, tenantRef } },
     });
+    if (linked === null) {
+      // Linked to no customer yet: recorded so an operator can pick it when linking. Not awaited,
+      // so the answer — the same 404 — takes no longer than any other tenant this credential may
+      // not see, and a recording failure cannot change it.
+      void this.sightings.record(principal, tenantRef, label);
+      throw notFound('The tenant');
+    }
+    const tenant =
+      linked.deploymentType === 'SAAS' && linked.deploymentId === principal.deploymentId
+        ? linked
+        : null;
     if (tenant === null) throw notFound('The tenant');
 
     // The live subscription, or — when there is none — the most recent cancelled one. A cancelled

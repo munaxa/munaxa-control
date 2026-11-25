@@ -83,6 +83,18 @@ export interface Tenant {
   deployment?: { id: string; name: string } | null;
 }
 
+/** A tenant a product deployment asked about that no customer holds yet. */
+export interface TenantSighting {
+  id: string;
+  product: string;
+  tenantRef: string;
+  /** The product's own name for the tenant, as it reported it. Informational. */
+  label: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  deployment: { id: string; name: string; product: string };
+}
+
 export interface CustomerDetail extends Customer {
   tenants: (Tenant & { subscriptions: SubscriptionSummary[]; installations: Installation[] })[];
 }
